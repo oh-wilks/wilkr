@@ -18,6 +18,11 @@ COPY alembic.ini ./
 RUN uv sync --frozen --no-dev
 
 ENV PATH="/app/.venv/bin:$PATH"
+# Python block-buffers stdout when it isn't a TTY (i.e. always, in a
+# container) — without this, print() output sits unflushed and never
+# reaches `docker logs`, silently defeating the one thing a plain-loop
+# service (garmin-sync) relies on for failure visibility.
+ENV PYTHONUNBUFFERED=1
 
 EXPOSE 8000
 

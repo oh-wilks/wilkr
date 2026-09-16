@@ -51,6 +51,20 @@ def format_date_short(value: datetime.datetime | None) -> str:
     return value.strftime("%d %b %Y")
 
 
+def format_time_ago(value: datetime.datetime | None) -> str:
+    if value is None:
+        return "never"
+    delta = datetime.datetime.now(datetime.timezone.utc).replace(tzinfo=None) - value
+    seconds = int(delta.total_seconds())
+    if seconds < 60:
+        return f"{seconds}s ago"
+    if seconds < 3600:
+        return f"{seconds // 60}m ago"
+    if seconds < 86400:
+        return f"{seconds // 3600}h ago"
+    return f"{seconds // 86400}d ago"
+
+
 def decimate(points: list, max_points: int = 500) -> list:
     """Even-stride downsampling — some FIT-derived streams have 5000+
     points, which is more resolution than a chart at typical widths can

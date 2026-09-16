@@ -1,0 +1,77 @@
+ENDURAIN - REFERENCE NOTES (NOT A DEPENDENCY, NOT INTEGRATED)
+=================================================================
+Purpose of this file: Endurain is an existing open-source project that
+is architecturally similar to OpenFit. This file exists so Claude Code
+has context on it as a REFERENCE - for API design inspiration, and in
+case a future "connect the iOS app to Endurain too" adapter is ever
+built. It is NOT something OpenFit depends on or integrates with in
+Phase 0-3. Do not write any Endurain-specific integration code unless
+explicitly asked.
+
+WHAT IT IS
+----------
+Self-hosted, Strava-like fitness tracking service. AGPL-3.0 licensed,
+actively maintained (endurain-project, ~2.2k GitHub stars, developed in
+the open on Codeberg, mirrored to GitHub read-only). Maintainer: Joao
+Vitoria Silva. Trademark note: "Endurain" name/logo is trademarked;
+self-hosting and personal/non-commercial use is explicitly permitted,
+commercial use of the name/logo is not.
+
+STACK
+-----
+- Backend: Python FastAPI, Alembic, SQLAlchemy, Apprise (notifications)
+- Sync libraries: stravalib (Strava), python-garminconnect (Garmin) -
+  same Garmin library OpenFit is using
+- File parsing: gpxpy, tcxreader, fitdecode (.gpx/.tcx/.fit)
+- Database: PostgreSQL
+- Frontend: Vue.js 3 + TypeScript, Tailwind CSS, shadcn-vue, Pinia,
+  TanStack Query - NOT Python, this is the one place OpenFit's stack
+  diverges intentionally (OpenFit is FastAPI+Jinja2+HTMX by design)
+- Observability: Jaeger tracing
+- Deployment: Docker image + docker-compose.yml.example
+
+FEATURES IT HAS (for comparison/inspiration, not to replicate 1:1)
+--------------------------------------------------------------------
+- Multi-user, admin/user roles, follower feeds, public profiles
+- Strava + Garmin Connect sync, plus manual .gpx/.tcx/.fit upload
+  (single or bulk)
+- Gear tracking with component wear (bikes, shoes, wetsuits, skis) -
+  more mature than OpenFit's planned equipment table
+- Body composition, weight, sleep, step logging
+- Distance/time goal tracking
+- TOTP MFA, OIDC/SSO, email verification
+- Multi-language, metric/imperial toggle, dark/light theme
+
+WHAT IT DOES NOT APPEAR TO HAVE
+---------------------------------
+- Segments / PR history on named routes (could not confirm this exists
+  anywhere in the feature list or docs). This is OpenFit's core
+  motivating feature - if true, it's a genuine gap, not something to
+  assume Endurain covers.
+
+MOBILE CLIENT STATUS
+----------------------
+Official companion app is "endurain-flutter" (Flutter/Dart, not
+native). As of this writing: TestFlight beta only, NOT on the App
+Store. Scope is ambitious for its apparent team size - live GPS
+recording, Bluetooth sensor pairing, HealthKit sync, offline mode,
+targeting both iOS and Android in one codebase. This is a genuine gap
+in the self-hosted-fitness-tracker space: no polished, focused native
+iOS viewer exists for this category. OpenFit's iOS app is aimed at
+exactly that gap - but built against OpenFit's own API first.
+
+PROJECT HEALTH NOTE
+---------------------
+Endurain announced a temporary feature freeze (shifting focus to
+stability/foundations over new features) around the time this was
+written. Relevant only if ever considering contributing a feature
+upstream - not relevant to OpenFit's own development.
+
+IF A FUTURE ENDURAIN ADAPTER IS EVER BUILT
+---------------------------------------------
+Do this only after OpenFit's own API is stable and the iOS app's
+networking layer already sits behind a protocol/interface (not
+hardcoded HTTP calls). At that point, an EndurainClient would implement
+the same interface as OpenFitClient. Expect friction points: different
+auth scheme, different data model (no segments to map to), different
+field names for equivalent concepts. Not planned for v1-v3 of OpenFit.

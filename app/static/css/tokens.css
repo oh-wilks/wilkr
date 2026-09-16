@@ -12,6 +12,7 @@
   --accent: #fca338;
   --tag-bg: #1c1b30;
   --tag-border: #39385d;
+  --danger: #f2555c;
 
   color-scheme: dark;
 }
@@ -26,6 +27,7 @@
     --accent: #d97306;
     --tag-bg: #eae9f2;
     --tag-border: #c3c1d5;
+    --danger: #c93a3a;
 
     color-scheme: light;
   }
@@ -40,6 +42,7 @@
   --accent: #d97306;
   --tag-bg: #eae9f2;
   --tag-border: #c3c1d5;
+  --danger: #c93a3a;
 
   color-scheme: light;
 }
@@ -53,6 +56,7 @@
   --accent: #fca338;
   --tag-bg: #1c1b30;
   --tag-border: #39385d;
+  --danger: #f2555c;
 
   color-scheme: dark;
 }

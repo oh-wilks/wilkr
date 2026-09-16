@@ -15,6 +15,7 @@ dependencies = [
     "gpxpy>=1.6",
     "tcxreader>=0.4",
     "jinja2>=3.1",
+    "garminconnect==0.3.15",
 ]
 
 [build-system]

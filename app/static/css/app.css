@@ -45,6 +45,15 @@ button.theme-toggle {
 }
 button.theme-toggle:hover { color: var(--text-primary); }
 
+.sync-health {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin: -12px 0 20px;
+}
+.sync-health-failed {
+  color: var(--danger);
+}
+
 /* activity list */
 
 .activity-row {

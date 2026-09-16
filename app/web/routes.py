@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.db.session import get_db
-from app.models import Activity, ActivityLap, Stream, Track
+from app.models import Activity, ActivityLap, GarminSyncState, Stream, Track
 from app.web.formatting import (
     decimate,
     format_date,
@@ -19,6 +19,7 @@ from app.web.formatting import (
     format_duration,
     format_elevation,
     format_speed,
+    format_time_ago,
 )
 
 router = APIRouter()
@@ -31,6 +32,7 @@ templates.env.filters["elevation"] = format_elevation
 templates.env.filters["date"] = format_date
 templates.env.filters["date_short"] = format_date_short
 templates.env.filters["speed"] = format_speed
+templates.env.filters["time_ago"] = format_time_ago
 
 PAGE_SIZE = 30
 
@@ -56,6 +58,7 @@ async def _fetch_page(db: AsyncSession, offset: int) -> tuple[list[Activity], bo
 @router.get("/activities")
 async def activity_list(request: Request, db: AsyncSession = Depends(get_db)):
     activities, has_more = await _fetch_page(db, 0)
+    garmin_sync = await db.scalar(select(GarminSyncState))
     return templates.TemplateResponse(
         request,
         "activities/list.html",
@@ -63,6 +66,7 @@ async def activity_list(request: Request, db: AsyncSession = Depends(get_db)):
             "activities": activities,
             "has_more": has_more,
             "next_offset": PAGE_SIZE,
+            "garmin_sync": garmin_sync,
         },
     )
 

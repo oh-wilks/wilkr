@@ -23,38 +23,27 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import async_session
-from app.importers.parsers.common import ParsedActivity, TrackPoint
+from app.importers.db_writer import first_timed_point, to_naive_utc, write_track_streams_laps
+from app.importers.parsers.common import ParsedActivity
 from app.importers.parsers.fit import parse_fit
 from app.importers.parsers.gpx import parse_gpx
 from app.importers.parsers.tcx import parse_tcx
 from app.importers.sport_mapping import resolve_sport
 from app.models import (
     Activity,
-    ActivityLap,
     Equipment,
     ImportEvent,
     Sport,
-    Stream,
-    Track,
     User,
     UserPreferences,
     equipment_sports,
 )
-from geoalchemy2.elements import WKTElement
 
 SOURCE = "strava_import"
 
 _FRENCH_MONTHS = {
     "janv.": 1, "févr.": 2, "mars": 3, "avr.": 4, "mai": 5, "juin": 6,
     "juil.": 7, "août": 8, "sept.": 9, "oct.": 10, "nov.": 11, "déc.": 12,
-}
-
-STREAM_EXTRACTORS = {
-    "heart_rate": lambda p: p.hr,
-    "elevation": lambda p: p.ele,
-    "speed": lambda p: p.speed,
-    "cadence": lambda p: p.cadence,
-    "power": lambda p: p.power,
 }
 
 
@@ -71,12 +60,6 @@ def _to_float(value: str | None) -> float | None:
 def _to_int(value: str | None) -> int | None:
     f = _to_float(value)
     return int(f) if f is not None else None
-
-
-def _to_naive_utc(value: datetime.datetime) -> datetime.datetime:
-    if value.tzinfo is not None:
-        value = value.astimezone(datetime.timezone.utc).replace(tzinfo=None)
-    return value
 
 
 def _parse_strava_date(value: str) -> datetime.datetime:
@@ -107,11 +90,6 @@ def _pick_parser(path: pathlib.Path):
     if "tcx" in suffixes:
         return parse_tcx
     return None
-
-
-def _points_to_linestring_z(points: list[TrackPoint]) -> WKTElement:
-    coords = ", ".join(f"{p.lon} {p.lat} {p.ele or 0}" for p in points)
-    return WKTElement(f"LINESTRING Z({coords})", srid=4326)
 
 
 # --------------------------------------------------------------------------
@@ -258,9 +236,9 @@ async def _import_one_activity(
         # Some GPX exports carry position data with no per-point <time> at
         # all (a pure route trace) — fall back to the CSV date rather than
         # crash on the first (untimed) point.
-        first_timed_point = next((p for p in parsed.points if p.time is not None), None)
-        if first_timed_point is not None:
-            started_at = _to_naive_utc(first_timed_point.time)
+        point = first_timed_point(parsed)
+        if point is not None:
+            started_at = to_naive_utc(point.time)
 
     elapsed_time_s = _to_int(row.get("Temps écoulé")) or 0
     moving_time_s = _to_int(row.get("Durée de déplacement")) or elapsed_time_s
@@ -286,35 +264,7 @@ async def _import_one_activity(
     await session.flush()
 
     if parsed:
-        gps_points = [p for p in parsed.points if p.lat is not None and p.lon is not None]
-        if len(gps_points) >= 2:
-            session.add(
-                Track(activity_id=activity.id, geom=_points_to_linestring_z(gps_points))
-            )
-
-        for stream_type, extractor in STREAM_EXTRACTORS.items():
-            series = [
-                {"t": _to_naive_utc(p.time).isoformat(), "v": extractor(p)}
-                for p in parsed.points
-                if p.time is not None and extractor(p) is not None
-            ]
-            if series:
-                session.add(Stream(activity_id=activity.id, type=stream_type, data=series))
-
-        for lap in parsed.laps:
-            session.add(
-                ActivityLap(
-                    activity_id=activity.id,
-                    lap_index=lap.lap_index,
-                    lap_type="active",
-                    started_at=_to_naive_utc(lap.started_at),
-                    elapsed_time_s=lap.elapsed_time_s,
-                    distance_m=lap.distance_m,
-                    elevation_change_m=lap.elevation_change_m,
-                    avg_speed_mps=lap.avg_speed_mps,
-                    max_speed_mps=lap.max_speed_mps,
-                )
-            )
+        write_track_streams_laps(session, activity.id, parsed)
 
     return activity.id
 

@@ -15,6 +15,18 @@
       <a class="brand" href="/activities">wilkr</a>
       <button class="theme-toggle" id="theme-toggle" type="button">theme</button>
     </header>
+    {% if garmin_sync is defined and garmin_sync %}
+    <div class="sync-health sync-health-{{ garmin_sync.last_run_status or 'unknown' }}">
+      Garmin sync:
+      {% if garmin_sync.last_run_status == 'success' %}
+        ok, {{ garmin_sync.last_synced_at | time_ago }}
+      {% elif garmin_sync.last_run_status == 'failed' %}
+        FAILED ({{ garmin_sync.updated_at | time_ago }}) — {{ garmin_sync.last_error_message }}
+      {% else %}
+        never run
+      {% endif %}
+    </div>
+    {% endif %}
     {% block content %}{% endblock %}
   </div>
   <script>

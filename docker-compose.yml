@@ -1,6 +1,7 @@
 services:
   db:
     image: postgis/postgis:16-3.4
+    restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -15,6 +16,7 @@ services:
 
   api:
     build: .
+    restart: unless-stopped
     depends_on:
       db:
         condition: service_healthy
@@ -23,5 +25,21 @@ services:
     ports:
       - "8000:8000"
 
+  garmin-sync:
+    build: .
+    restart: unless-stopped
+    command: ["python", "-m", "app.importers.garmin", "--loop"]
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      GARMIN_EMAIL: ${GARMIN_EMAIL}
+      GARMIN_PASSWORD: ${GARMIN_PASSWORD}
+      GARMIN_SYNC_INTERVAL_S: ${GARMIN_SYNC_INTERVAL_S:-3600}
+    volumes:
+      - garmin_tokens:/data/garmin
+
 volumes:
   pgdata:
+  garmin_tokens:
