@@ -192,39 +192,39 @@ COMMENT ON COLUMN "client_devices"."platform" IS 'ios, web, other';
 
 COMMENT ON COLUMN "client_devices"."app_version" IS 'nullable — self-reported client version';
 
-ALTER TABLE "activities" ADD FOREIGN KEY ("user_id") REFERENCES "users" ("id") DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE "activities" ADD FOREIGN KEY ("user_id") REFERENCES "users" ("id");
 
-ALTER TABLE "equipment" ADD FOREIGN KEY ("user_id") REFERENCES "users" ("id") DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE "equipment" ADD FOREIGN KEY ("user_id") REFERENCES "users" ("id");
 
-ALTER TABLE "user_preferences" ADD FOREIGN KEY ("user_id") REFERENCES "users" ("id") DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE "user_preferences" ADD FOREIGN KEY ("user_id") REFERENCES "users" ("id");
 
-ALTER TABLE "activities" ADD FOREIGN KEY ("sport_id") REFERENCES "sports" ("id") DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE "activities" ADD FOREIGN KEY ("sport_id") REFERENCES "sports" ("id");
 
-ALTER TABLE "segments" ADD FOREIGN KEY ("sport_id") REFERENCES "sports" ("id") DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE "segments" ADD FOREIGN KEY ("sport_id") REFERENCES "sports" ("id");
 
-ALTER TABLE "equipment_sports" ADD FOREIGN KEY ("sport_id") REFERENCES "sports" ("id") DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE "equipment_sports" ADD FOREIGN KEY ("sport_id") REFERENCES "sports" ("id");
 
-ALTER TABLE "equipment_sports" ADD FOREIGN KEY ("equipment_id") REFERENCES "equipment" ("id") DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE "equipment_sports" ADD FOREIGN KEY ("equipment_id") REFERENCES "equipment" ("id");
 
-ALTER TABLE "activities" ADD FOREIGN KEY ("equipment_id") REFERENCES "equipment" ("id") DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE "activities" ADD FOREIGN KEY ("equipment_id") REFERENCES "equipment" ("id");
 
-ALTER TABLE "tracks" ADD FOREIGN KEY ("activity_id") REFERENCES "activities" ("id") DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE "tracks" ADD FOREIGN KEY ("activity_id") REFERENCES "activities" ("id");
 
-ALTER TABLE "streams" ADD FOREIGN KEY ("activity_id") REFERENCES "activities" ("id") DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE "streams" ADD FOREIGN KEY ("activity_id") REFERENCES "activities" ("id");
 
-ALTER TABLE "activity_laps" ADD FOREIGN KEY ("activity_id") REFERENCES "activities" ("id") DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE "activity_laps" ADD FOREIGN KEY ("activity_id") REFERENCES "activities" ("id");
 
-ALTER TABLE "segment_efforts" ADD FOREIGN KEY ("activity_id") REFERENCES "activities" ("id") DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE "segment_efforts" ADD FOREIGN KEY ("activity_id") REFERENCES "activities" ("id");
 
-ALTER TABLE "segment_efforts" ADD FOREIGN KEY ("segment_id") REFERENCES "segments" ("id") DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE "segment_efforts" ADD FOREIGN KEY ("segment_id") REFERENCES "segments" ("id");
 
-ALTER TABLE "user_preferences" ADD FOREIGN KEY ("default_sport_id") REFERENCES "sports" ("id") DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE "user_preferences" ADD FOREIGN KEY ("default_sport_id") REFERENCES "sports" ("id");
 
-ALTER TABLE "import_events" ADD FOREIGN KEY ("user_id") REFERENCES "users" ("id") DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE "import_events" ADD FOREIGN KEY ("user_id") REFERENCES "users" ("id");
 
-ALTER TABLE "import_events" ADD FOREIGN KEY ("activity_id") REFERENCES "activities" ("id") DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE "import_events" ADD FOREIGN KEY ("activity_id") REFERENCES "activities" ("id");
 
-ALTER TABLE "client_devices" ADD FOREIGN KEY ("user_id") REFERENCES "users" ("id") DEFERRABLE INITIALLY IMMEDIATE;
+ALTER TABLE "client_devices" ADD FOREIGN KEY ("user_id") REFERENCES "users" ("id");
 
 -- CHECK constraints on fixed-value columns — DBML has no native CHECK syntax,
 -- so these are appended by hand after each dbml2sql regeneration.
@@ -248,3 +248,12 @@ ALTER TABLE "sports" ADD CONSTRAINT "ck_sports_category" CHECK ("category" IN ('
 ALTER TABLE "user_preferences" ADD CONSTRAINT "ck_user_preferences_unit_system" CHECK ("unit_system" IN ('metric', 'imperial'));
 
 ALTER TABLE "client_devices" ADD CONSTRAINT "ck_client_devices_platform" CHECK ("platform" IN ('ios', 'web', 'other'));
+
+-- Spatial GIST indexes — DBML has no way to express USING GIST either, so
+-- these are appended by hand too. GeoAlchemy2 expects one on every Geometry
+-- column by default (spatial_index=True) — without it, segment matching's
+-- PostGIS spatial-buffer queries would be a full table scan.
+
+CREATE INDEX "idx_tracks_geom" ON "tracks" USING GIST ("geom");
+
+CREATE INDEX "idx_segments_geom" ON "segments" USING GIST ("geom");
