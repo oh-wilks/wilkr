@@ -1,0 +1,110 @@
+erDiagram
+    USERS ||--o{ ACTIVITIES : owns
+    USERS ||--o{ EQUIPMENT : owns
+    USERS ||--|| USER_PREFERENCES : has
+    SPORTS ||--o{ ACTIVITIES : classifies
+    SPORTS ||--o{ SEGMENTS : classifies
+    SPORTS ||--o{ EQUIPMENT_SPORTS : applies_to
+    EQUIPMENT ||--o{ EQUIPMENT_SPORTS : applicable_to
+    EQUIPMENT ||--o{ ACTIVITIES : used_in
+    ACTIVITIES ||--|| TRACKS : has
+    ACTIVITIES ||--o{ STREAMS : has
+    ACTIVITIES ||--o{ ACTIVITY_LAPS : has
+    ACTIVITIES ||--o{ SEGMENT_EFFORTS : produces
+    SEGMENTS ||--o{ SEGMENT_EFFORTS : matched_by
+
+    USERS {
+        int id PK
+        string username
+        string email
+        string display_name
+        float weight_kg "for TSS, power-to-weight"
+        float height_cm
+        date birth_date "for age-based HR zones"
+        int resting_hr
+        int max_hr
+        int ftp_watts "cycling, nullable"
+        string timezone
+        datetime created_at
+        datetime updated_at
+    }
+    USER_PREFERENCES {
+        int user_id PK_FK
+        string unit_system "metric | imperial, display only"
+        int default_sport_id FK "nullable"
+        string theme
+        jsonb extra "future settings, no migration needed"
+    }
+    SPORTS {
+        int id PK
+        string name "running | road_cycling | mtb | alpine_ski | nordic_ski | hike | swim"
+        string category "endurance | strength | other"
+    }
+    EQUIPMENT {
+        int id PK
+        int user_id FK
+        string name "e.g. Pegasus 40 (right)"
+        string type "shoe | bike | ski | other"
+        string brand
+        string model
+        date purchased_at
+        date retired_at "nullable"
+        boolean is_active
+    }
+    EQUIPMENT_SPORTS {
+        int equipment_id PK_FK
+        int sport_id PK_FK
+    }
+    ACTIVITIES {
+        int id PK
+        int user_id FK
+        int sport_id FK
+        int equipment_id FK "nullable"
+        string source "strava_import | garmin_sync | manual"
+        string external_id "dedupe key from source"
+        string name
+        datetime started_at
+        int moving_time_s
+        int elapsed_time_s
+        float distance_m
+        float elevation_gain_m
+        int avg_hr
+    }
+    TRACKS {
+        int id PK
+        int activity_id FK
+        geometry geom "LineStringZ, SRID 4326"
+    }
+    STREAMS {
+        int id PK
+        int activity_id FK
+        string type "heart_rate | elevation | speed | cadence | power"
+        jsonb data "time-series array"
+    }
+    ACTIVITY_LAPS {
+        int id PK
+        int activity_id FK
+        int lap_index
+        string lap_type "run | lift | active | rest | interval"
+        datetime started_at
+        int elapsed_time_s
+        float distance_m
+        float elevation_change_m
+        float avg_speed_mps
+        float max_speed_mps
+    }
+    SEGMENTS {
+        int id PK
+        string name
+        int sport_id FK
+        geometry geom "LineString, SRID 4326"
+        datetime created_at
+    }
+    SEGMENT_EFFORTS {
+        int id PK
+        int segment_id FK
+        int activity_id FK
+        int elapsed_time_s
+        datetime achieved_at
+        boolean is_pr
+    }

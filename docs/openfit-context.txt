@@ -1,0 +1,140 @@
+OPENFIT - PROJECT CONTEXT AND DECISIONS
+=========================================
+Personal, self-hosted, open-source fitness platform. Not competing with
+Strava - this is a learning project (backend/infra skills for a career
+pivot) plus something genuinely useful day to day. Motivating feature:
+segments, i.e. seeing your own times on your own recurring routes across
+years of history, the way Strava's premium tier does it.
+
+STACK
+-----
+- Backend: FastAPI (Python)
+- Web frontend: FastAPI + Jinja2 templates + HTMX (no React/Svelte SPA).
+  One accepted exception: an embedded MapLibre GL (or Leaflet) JS widget
+  for rendering maps - this is an isolated component, not a frontend
+  framework. Everything else server-rendered Python.
+- Database: PostgreSQL + PostGIS
+- Networking: Tailscale only. No public domain/SSL needed for v1.
+- Mobile: native iOS (Swift). Viewer only - no GPS recording, no
+  HealthKit, no background location modes. Shows activities, maps,
+  charts, and segment history that already live on the server. Includes
+  a Share Extension to manually import a .FIT/.GPX file as a fallback
+  import path.
+
+DATA INGESTION (core feature, must not be cumbersome)
+-------------------------------------------------------
+1. One-time bulk import of the full Strava export archive (GPX/TCX/FIT)
+   to seed complete historical data on day one.
+2. Ongoing automatic Garmin sync: a scheduled job (systemd timer or cron,
+   running as a container) using the unofficial python-garminconnect
+   library, with token persistence so re-auth isn't constant. Polls on a
+   timer and writes new activities straight into Postgres. This is the
+   primary, hands-off path going forward.
+3. Manual Share Sheet import (Phase 3, iOS) - fallback for the day the
+   unofficial Garmin sync breaks, or for one-off activities from other
+   sources.
+Note: no official Garmin API was used - it requires partner-program
+approval, not practical for a solo project.
+
+UNITS CONVENTION
+-----------------
+Store everything internally in metric (meters, kilograms, seconds),
+always, regardless of the user's display preference. Convert to
+imperial only at the display/API-response layer, based on
+user_preferences.unit_system. Nothing upstream of the UI layer should
+need to know or care about display units.
+
+SCHEMA DECISIONS (see openfit-erd.mermaid for the full diagram)
+-------------------------------------------------------------------
+- users: identity + biometric fields only (weight_kg, height_cm,
+  birth_date, resting_hr, max_hr, ftp_watts). No app-settings fields
+  here - those live in user_preferences.
+- user_preferences: separate one-to-one table (unit_system,
+  default_sport_id, theme, plus an "extra" jsonb catch-all column for
+  future settings without needing a migration each time).
+- sports: lookup table (name, category) - replaces a free-text
+  sport_type column on activities/segments, so sport is filterable and
+  consistent.
+- equipment: gear items (name, type, brand, model, purchased_at,
+  retired_at, is_active), owned by a user.
+- equipment_sports: many-to-many join table between equipment and
+  sports - one bike can serve multiple sports (road + gravel), one
+  sport can have multiple equipment items in rotation (two pairs of
+  running shoes).
+- activities: user_id, sport_id, equipment_id (nullable), source
+  (strava_import | garmin_sync | manual), external_id (the dedupe key -
+  both import paths write into this same table, external_id is what
+  prevents duplicate rows on re-sync/re-import), name, started_at,
+  moving_time_s, elapsed_time_s, distance_m, elevation_gain_m, avg_hr.
+- tracks: one-to-one with activities, geometry column (LineStringZ,
+  SRID 4326). Kept separate from activities so the heavy geometry
+  column doesn't bloat every query against the activity list.
+- streams: generic time-series table - a "type" column (heart_rate,
+  elevation, speed, cadence, power) plus a jsonb "data" column, rather
+  than one column per metric. Fine at personal-project data volume.
+- activity_laps: raw, device-reported laps. lap_index, lap_type
+  (run | lift | active | rest | interval), started_at, elapsed_time_s,
+  distance_m, elevation_change_m, avg_speed_mps, max_speed_mps.
+  IMPORTANT: this data is parsed once at import time from the FIT file's
+  own lap messages - Garmin's ski mode already auto-detects run vs lift
+  transitions (descending fast = run, ascending = lift) and writes them
+  as separate laps in the FIT file. Do NOT build a custom run/lift
+  detection algorithm for v1 - just parse what the device already
+  computed.
+- segments: user-defined named geographic segments (name, sport_id,
+  geometry LineString). This is the core motivational feature - not
+  just for cycling climbs, but also usable for named ski resort runs
+  (fixed, repeatable geography) to get a cross-session PR history the
+  same way.
+- segment_efforts: join table between segments and activities -
+  elapsed_time_s, achieved_at, is_pr. Matched via PostGIS spatial-buffer
+  queries against activity tracks.
+
+BACKUP
+------
+Pi 5 (production server) backs up to M920Q homelab node 2 (existing
+Proxmox backup node for node 1) via restic, not Proxmox Backup Client -
+PBS's client is only officially built for AMD64; ARM64 builds are
+unofficial/community-only and considered too fragile for this project's
+"low hassle" requirement. Plan: pg_dump on the Pi 5, then restic backup
+to a repository on node 2, scheduled via systemd timer alongside the
+Garmin sync job. restic has a native ARM64 build.
+
+DEV WORKFLOW
+------------
+- Primary dev machine: ThinkPad P15 (32GB RAM, 2TB SSD), Windows + WSL2
+  (no dual-boot, no second OS). Keep project files inside the WSL2
+  filesystem (e.g. ~/projects/openfit), NOT under /mnt/c - Docker
+  Desktop's WSL2 backend is much faster that way. Full docker compose
+  stack (FastAPI + Postgres/PostGIS) runs and is iterated on here.
+- Target production host: Raspberry Pi 5 (8GB RAM), Kingston NV3 M.2
+  2230 1TB NVMe SSD via M.2 HAT, boots from SSD, reachable only over
+  Tailscale.
+- Architecture gotcha: P15 is x86_64, Pi 5 is ARM64. Don't cross-build
+  with docker buildx/QEMU (slow, occasionally flaky) - instead git pull
+  the code on the Pi 5 and run `docker compose build` natively there.
+  postgis/postgis is already published multi-arch, so that image is
+  just a pull on either machine, no build needed.
+- Data moves between machines via pg_dump/pg_restore, never by copying
+  the Postgres data directory directly.
+- MacBook Air M1 (8GB RAM, 256GB SSD) is reserved for Xcode/iOS work
+  only, starting in Phase 3. The iOS app just points at a server URL
+  (P15 during dev, the Pi 5's Tailscale address once live) - there's no
+  "transfer" step for the app itself, just a config value change.
+  Don't enroll in the Apple Developer Program ($99/yr) until past
+  Xcode's 7-day free-provisioning window for personal use, or until a
+  second TestFlight tester is needed.
+
+PHASING (high level - see full charter for details)
+-----------------------------------------------------
+Phase 0: Docker Compose server skeleton, schema/migrations, Tailscale
+         networking. AI-agent-assisted.
+Phase 1: Strava bulk import + scheduled Garmin sync job (both core) +
+         minimal Jinja2/HTMX web viewer (activity list, map, charts).
+Phase 2: Segments - creation UI, PostGIS matching, per-segment history
+         view. This is the motivational core feature.
+Phase 3: iOS viewer app - read-only screens + Share Extension import.
+Backlog (opportunistic, no fixed timeline): gear-mileage automation
+         beyond basic tracking, TSS/NP/training-load metrics, HealthKit
+         auto-import, App Store publishing, Android/cross-platform,
+         ActivityPub federation.

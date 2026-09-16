@@ -1,0 +1,142 @@
+OPENFIT - PROJECT CHARTER v4 (FINAL SCOPE)
+=============================================
+Self-hosted, all-Python where possible, Tailscale-networked, segments-first.
+
+WHAT CHANGED FROM v3
+---------------------
+- Automatic Garmin sync is now a core Phase 1 feature, not a manual
+  fallback. A scheduled Python job using python-garminconnect runs on a
+  timer inside the Docker Compose stack, pulling new activities into
+  Postgres with no manual step. This is the "not cumbersome" requirement
+  - set up once, then it just runs.
+- One-time Strava bulk import kicks off data collection. Before the
+  Garmin sync has years of history to work with, you import your full
+  Strava export archive once, so day one already has your complete
+  activity history to browse, chart, and build segments against.
+- Manual Share Sheet import stays as the fallback, for the day the
+  unofficial Garmin sync breaks or for one-off activities from other
+  sources.
+
+WHAT CHANGED FROM v2
+---------------------
+- Stack is now majority Python, front to back. Backend: FastAPI. Web
+  frontend: FastAPI + Jinja2 templates + HTMX for interactivity - no
+  React/Svelte SPA. One honest exception: rendering a map needs a JS
+  mapping library (Leaflet or MapLibre GL) loaded as a small embedded
+  widget. That's an isolated component, not a frontend framework -
+  everything around it (routing, state, data, charts) stays Python.
+- Networking is Tailscale-only. No public exposure, no domain/SSL
+  needed for personal use. (Keep the domain line in the budget only if
+  you later want it reachable outside your tailnet.)
+- Segments moved from backlog to a core phase. This is the feature you
+  actually want for motivation - seeing your own times on your own
+  recurring routes over years of history - so it's no longer an
+  opportunistic nice-to-have.
+- iOS app is now purely a viewer, matching the Navidrome/LMS-companion
+  model: it shows what's on your server (activities, segments, charts)
+  and handles Garmin FIT import via the Share Sheet. No recording, no
+  HealthKit, no background modes.
+
+ARCHITECTURE
+------------
+- Server: FastAPI (Python), Uvicorn/Gunicorn, on your homelab mini PCs
+  (Pi 5 as primary target) via Docker Compose.
+- Database: PostgreSQL + PostGIS.
+- Web frontend: FastAPI + Jinja2 + HTMX. One embedded MapLibre GL (or
+  Leaflet) widget per page that needs a map; everything else
+  server-rendered Python.
+- Networking: Tailscale - the app is only reachable on your tailnet.
+- Mobile: Native iOS (Swift), share-extension import + read-only views
+  of activities/segments.
+- Data in: Strava bulk export (one-time), automatic Garmin Connect sync
+  (ongoing, via python-garminconnect), or manual .FIT/.GPX upload via
+  the iOS Share Sheet or web UI (fallback).
+
+PHASED ROADMAP
+--------------
+
+Phase 0 - Server Skeleton (2-4 weeks, AI-agent-assisted)
+  - Docker Compose: Postgres+PostGIS + FastAPI containers, reachable
+    over Tailscale only.
+  - Core schema: users, user_preferences, sports, equipment,
+    equipment_sports (many-to-many), activities, tracks (PostGIS
+    LineString), streams, activity_laps, segments, segment_efforts.
+    (See openfit-erd.mermaid and openfit-context.txt for the full
+    schema detail and the reasoning behind each table.)
+  - Minimal auth (single-user API key is fine to start).
+  - Ships: a running, tailnet-reachable API.
+
+Phase 1 - Data Collection + Web Viewer (8-12 weeks)
+  Two data paths, both core:
+  1. One-time Strava bulk import - batch importer for your full Strava
+     export archive (GPX/TCX/FIT), run once to seed your complete
+     history on day one.
+  2. Ongoing automatic Garmin sync - a scheduled container job using
+     python-garminconnect (with token persistence so you don't re-auth
+     constantly), polling on a timer and writing new activities
+     straight into Postgres. This is the "set and forget" path going
+     forward; manual Share Sheet import (Phase 3) is the fallback if it
+     ever breaks.
+  Plus:
+  - Moving-time recalculation, elevation correction, polyline
+    compression (shared by both import paths).
+  - Jinja2+HTMX web pages: activity list, per-activity map (MapLibre
+    widget) + time-series charts (HR, elevation, speed).
+  - Ships: your full historical archive and a live, hands-off feed of
+    new activities - self-hosted, browsable from any device on your
+    tailnet.
+
+Phase 2 - Segments (6-10 weeks) - the motivational core
+  - Segment creation UI: draw or select a start/end on an existing
+    track, save as a named segment.
+  - PostGIS spatial-buffer matching: scan historical + new activities
+    for efforts on each segment.
+  - Per-segment history view: your times across every pass, PR
+    highlighted, trend over time. Also usable for named ski-resort
+    runs, not just cycling climbs.
+  - Ships: the actual feature you're building this for - your own
+    segment leaderboard-of-one, going back through everything you've
+    imported.
+
+Phase 3 - iOS Viewer App (8-12 weeks, mostly boilerplate an AI agent
+can draft)
+  - Read-only screens: activity list, activity detail (map + charts),
+    segment list, segment history.
+  - Share Extension: receive a .FIT/.GPX from Garmin Connect, upload to
+    your server.
+  - No CoreLocation, no background modes, no HealthKit - this keeps it
+    genuinely small.
+  - Cost timing: hold off on the $99/yr Apple Developer Program until
+    you're past Xcode's 7-day free-provisioning window for your own
+    device, or want to add a second tester.
+  - Ships: the phone-in-pocket view of your own server, a la
+    Navidrome's companion app.
+
+Backlog (opportunistic, no fixed timeline)
+  Gear-mileage automation beyond basic tracking, TSS/NP/training-load
+  metrics, HealthKit auto-import, App Store publishing,
+  Android/cross-platform, ActivityPub federation. Pull one in per
+  quarter only if it still excites you after Phase 3.
+
+COST BREAKDOWN (Tailscale-only, no public domain needed for v1)
+-------------------------------------------------------------------
+Category           Item                          Type          Cost              When
+Hardware           Homelab mini PC               Sunk          $0 (budgeted)     Phase 0
+Hardware           Pi 5 NVMe SSD (Kingston NV3    One-time      ~1TB, purchased   Phase 0
+                    1TB M.2 2230)
+Hardware           Mac for Xcode builds           One-time      $500-600         Phase 3 start
+Dev Account        Apple Developer Program        Recurring     $99/yr           Deferred to end of Phase 3
+Software           AI coding agent (Claude Code   Recurring     Per your usage   Phases 0-3
+                    or similar)
+Infra (optional)   Domain + SSL                   Recurring     $10-15/yr        Only if exposed beyond Tailscale
+                                                                 --------------------------------
+                    Total to reach Phase 3 ship:  ~$500-600 (Mac) + SSD cost already spent + AI-agent spend
+
+TIME BUDGET REALITY CHECK
+--------------------------
+At 6 hrs/week with AI-agent help on the Python phases: Phase 0-1 is
+roughly 3 months, Phase 2 (segments) roughly 2-3 months, Phase 3 (iOS
+viewer) roughly 2-3 months. Roughly 7-9 months total to a self-hosted
+server with your full history, working segments, and a phone app to
+view it all - over Tailscale, with zero dependency on any platform you
+don't control.
