@@ -8,6 +8,7 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    Text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -30,6 +31,14 @@ class Activity(Base):
         String, nullable=False, comment="dedupe key from source"
     )
     name: Mapped[str] = mapped_column(String, nullable=False)
+    description: Mapped[str | None] = mapped_column(
+        Text,
+        comment=(
+            "nullable — merges Strava description + private note; nothing "
+            "in wilkr is ever public, so that distinction does not matter "
+            "here"
+        ),
+    )
     started_at: Mapped[datetime.datetime] = mapped_column(DateTime, nullable=False)
     moving_time_s: Mapped[int] = mapped_column(Integer, nullable=False)
     elapsed_time_s: Mapped[int] = mapped_column(Integer, nullable=False)

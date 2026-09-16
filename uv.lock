@@ -113,6 +113,15 @@ wheels = [
 ]
 
 [[package]]
+name = "fitdecode"
+version = "0.11.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/87/19/1bde056f443d8ce890dbc0f0bd8a216cc9ebfda4221619767f80cf1835e2/fitdecode-0.11.0.tar.gz", hash = "sha256:52d920e50eaa76eb065b20bfd4e42f72195e894a079098dacc1cafa908cd4b83", size = 107149, upload-time = "2025-08-06T08:08:42.105Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/7b/7b/75829f9b77b2546f955ec265de10de993939bf3218b5d957ca79803a2d28/fitdecode-0.11.0-py3-none-any.whl", hash = "sha256:a1bdb9b4d1e9ebac0001fc58c22fe07a3f9967ca4e13258c6ef99cdb8d697a78", size = 109961, upload-time = "2025-08-06T08:08:39.033Z" },
+]
+
+[[package]]
 name = "geoalchemy2"
 version = "0.20.0"
 source = { registry = "https://pypi.org/simple" }
@@ -123,6 +132,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/63/74/6cb1ef591bf47d28f41aa770f2f3a91c0a570aee0a4083bed7f8c533d8df/geoalchemy2-0.20.0.tar.gz", hash = "sha256:450f427f4bc3cf2d5ddee0af3763aed0f3eea2384e7c9a99798d8f1508279322", size = 280805, upload-time = "2026-05-12T14:50:26.132Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/4e/08/b66ad4239f592e05202e25925c08cdd04cc14c3994000ec70ec61fea202c/geoalchemy2-0.20.0-py3-none-any.whl", hash = "sha256:1489a1d106519542a79c97cd0b4c537d80462c353610ebc2429cf2c43daac717", size = 96467, upload-time = "2026-05-12T14:50:24.998Z" },
+]
+
+[[package]]
+name = "gpxpy"
+version = "1.6.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/20/ad/6f1a34e702c72cb495bb258396f237ded76c00f9fe67054a44d778d24ed9/gpxpy-1.6.2.tar.gz", hash = "sha256:a72c484b97ec42b80834353b029cc8ee1b79f0ffca1179b2210bb3baf26c01ae", size = 111695, upload-time = "2023-11-29T17:25:38.391Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/44/9f/62df6c1e52462bdd04275b36cec49efa9e8af7e7b834499eb288f73dcfbc/gpxpy-1.6.2-py3-none-any.whl", hash = "sha256:289bc2d80f116c988d0a1e763fda22838f83005573ece2bbc6521817b26fb40a", size = 42649, upload-time = "2023-11-29T17:25:35.76Z" },
 ]
 
 [[package]]
@@ -549,6 +567,15 @@ wheels = [
 ]
 
 [[package]]
+name = "tcxreader"
+version = "0.4.11"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/a6/b3/7316a0b6d208758dd4c31677ad19f6d88a536d504fb09d0ae06dd4cef5f1/tcxreader-0.4.11.tar.gz", hash = "sha256:27a79f48754a968b801ba80890cfb2ac1835ba27387a257c514b90db73edc20b", size = 13015, upload-time = "2025-03-04T15:22:01.659Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3b/08/e1300bc8031935b178f81db53478ccedb93d3eabd0a09aaac408dbb0d7a5/tcxreader-0.4.11-py3-none-any.whl", hash = "sha256:fffff13f81c7f54fff734da91d61b6814d2b1422917a7011f6639281d150fd0e", size = 10845, upload-time = "2025-03-04T15:22:00.046Z" },
+]
+
+[[package]]
 name = "typing-extensions"
 version = "4.16.0"
 source = { registry = "https://pypi.org/simple" }
@@ -847,9 +874,12 @@ dependencies = [
     { name = "alembic" },
     { name = "asyncpg" },
     { name = "fastapi" },
+    { name = "fitdecode" },
     { name = "geoalchemy2" },
+    { name = "gpxpy" },
     { name = "pydantic-settings" },
     { name = "sqlalchemy", extra = ["asyncio"] },
+    { name = "tcxreader" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -858,8 +888,11 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.13" },
     { name = "asyncpg", specifier = ">=0.30" },
     { name = "fastapi", specifier = ">=0.115" },
+    { name = "fitdecode", specifier = ">=0.10" },
     { name = "geoalchemy2", specifier = ">=0.15" },
+    { name = "gpxpy", specifier = ">=1.6" },
     { name = "pydantic-settings", specifier = ">=2.6" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0" },
+    { name = "tcxreader", specifier = ">=0.4" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
 ]

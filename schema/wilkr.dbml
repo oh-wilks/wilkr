@@ -61,6 +61,7 @@ Table activities {
   source varchar [not null, note: 'strava_import, garmin_sync, manual']
   external_id varchar [not null, note: 'dedupe key from source']
   name varchar [not null]
+  description text [note: 'nullable — merges Strava description + private note; nothing in wilkr is ever public, so that distinction does not matter here']
   started_at timestamp [not null]
   moving_time_s int [not null]
   elapsed_time_s int [not null]

@@ -1,6 +1,6 @@
 -- SQL dump generated using DBML (dbml.dbdiagram.io)
 -- Database: PostgreSQL
--- Generated at: 2026-09-16T05:53:34.958Z
+-- Generated at: 2026-09-16T06:02:03.585Z
 
 CREATE EXTENSION IF NOT EXISTS postgis;
 
@@ -59,6 +59,7 @@ CREATE TABLE "activities" (
   "source" varchar NOT NULL,
   "external_id" varchar NOT NULL,
   "name" varchar NOT NULL,
+  "description" text,
   "started_at" timestamp NOT NULL,
   "moving_time_s" int NOT NULL,
   "elapsed_time_s" int NOT NULL,
@@ -163,6 +164,8 @@ COMMENT ON COLUMN "activities"."equipment_id" IS 'nullable';
 COMMENT ON COLUMN "activities"."source" IS 'strava_import, garmin_sync, manual';
 
 COMMENT ON COLUMN "activities"."external_id" IS 'dedupe key from source';
+
+COMMENT ON COLUMN "activities"."description" IS 'nullable — merges Strava description + private note; nothing in wilkr is ever public, so that distinction does not matter here';
 
 COMMENT ON COLUMN "activities"."max_hr" IS 'peak HR reached during this activity — distinct from users.max_hr, the training-zone ceiling';
 

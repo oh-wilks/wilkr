@@ -11,6 +11,9 @@ dependencies = [
     "asyncpg>=0.30",
     "alembic>=1.13",
     "pydantic-settings>=2.6",
+    "fitdecode>=0.10",
+    "gpxpy>=1.6",
+    "tcxreader>=0.4",
 ]
 
 [build-system]
