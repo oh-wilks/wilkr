@@ -29,6 +29,7 @@ from app.importers.parsers.fit import parse_fit
 from app.importers.parsers.gpx import parse_gpx
 from app.importers.parsers.tcx import parse_tcx
 from app.importers.sport_mapping import resolve_sport
+from app.segments.matching import match_activity_against_segments
 from app.models import (
     Activity,
     Equipment,
@@ -288,6 +289,7 @@ async def run(export_dir: pathlib.Path, limit: int | None) -> None:
         rows = rows[:limit]
 
     counts = {"success": 0, "failed": 0, "duplicate": 0}
+    new_activity_ids: list[int] = []
 
     for row in rows:
         external_id = row["ID de l'activité"]
@@ -328,6 +330,7 @@ async def run(export_dir: pathlib.Path, limit: int | None) -> None:
                 )
                 await session.commit()
             counts["success"] += 1
+            new_activity_ids.append(activity_id)
         except Exception as exc:  # noqa: BLE001 — one bad row must not stop the run
             async with async_session() as session:
                 session.add(
@@ -343,6 +346,23 @@ async def run(export_dir: pathlib.Path, limit: int | None) -> None:
             print(f"FAILED {external_id}: {exc}")
 
     print(f"Done: {counts}")
+
+    # Segment matching runs as a separate pass after the import loop, not
+    # inside each activity's own transaction — keeps the already-verified
+    # import path untouched, and matches the charter's "scan new
+    # activities" wording without slowing down bulk import.
+    segment_matches = 0
+    for activity_id in new_activity_ids:
+        try:
+            async with async_session() as session:
+                async with session.begin():
+                    efforts = await match_activity_against_segments(session, activity_id)
+                    segment_matches += len(efforts)
+        except Exception as exc:  # noqa: BLE001 — one bad match must not stop the rest
+            print(f"Segment matching failed for activity {activity_id}: {exc}")
+
+    if new_activity_ids:
+        print(f"Segment matches: {segment_matches}")
 
 
 def main() -> None:

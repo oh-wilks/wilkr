@@ -41,8 +41,24 @@ def write_track_streams_laps(
 ) -> None:
     gps_points = [p for p in parsed.points if p.lat is not None and p.lon is not None]
     if len(gps_points) >= 2:
+        # times must line up 1:1 with geom's vertices for segment matching
+        # to map a located position back to a real timestamp — if even one
+        # point lacks a time (the untimed-GPX case db_writer's caller
+        # already has to handle elsewhere), leave the whole array NULL
+        # rather than build a partially-aligned one; a track with no times
+        # simply can't participate in matching, same honest degradation as
+        # skipping the Track row entirely when there's no GPS at all.
+        times = (
+            [to_naive_utc(p.time) for p in gps_points]
+            if all(p.time is not None for p in gps_points)
+            else None
+        )
         session.add(
-            Track(activity_id=activity_id, geom=points_to_linestring_z(gps_points))
+            Track(
+                activity_id=activity_id,
+                geom=points_to_linestring_z(gps_points),
+                times=times,
+            )
         )
 
     for stream_type, extractor in STREAM_EXTRACTORS.items():

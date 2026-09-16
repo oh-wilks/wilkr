@@ -2,7 +2,7 @@ import datetime
 
 from geoalchemy2 import Geometry
 from sqlalchemy import DateTime, ForeignKey, Identity, Integer, String, func
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 
@@ -22,6 +22,8 @@ class Segment(Base):
         DateTime, nullable=False, server_default=func.now()
     )
 
+    sport: Mapped["Sport"] = relationship()
+
 
 class SegmentEffort(Base):
     __tablename__ = "segment_efforts"
@@ -35,6 +37,8 @@ class SegmentEffort(Base):
     )
     elapsed_time_s: Mapped[int] = mapped_column(Integer, nullable=False)
     achieved_at: Mapped[datetime.datetime] = mapped_column(DateTime, nullable=False)
+
+    activity: Mapped["Activity"] = relationship()
 
     __table_args__ = {
         "comment": (

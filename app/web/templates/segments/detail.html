@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}{{ segment.name }} — wilkr{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+{% endblock %}
+
+{% block content %}
+<div class="detail-header">
+  <h1>{{ segment.name }}</h1>
+  <div class="meta">
+    <span class="sport-tag">{{ segment.sport.name }}</span>
+    &nbsp;{{ efforts | length }} effort{{ "s" if efforts | length != 1 else "" }}
+  </div>
+</div>
+
+{% if geojson %}
+<div id="map"></div>
+{% endif %}
+
+{% if efforts %}
+<div class="chart-card">
+  <div class="chart-label">elapsed time trend</div>
+  <canvas id="chart-trend" height="70"></canvas>
+</div>
+
+<table class="laps">
+  <thead>
+    <tr><th></th><th>Activity</th><th>Date</th><th>Time</th></tr>
+  </thead>
+  <tbody>
+    {% for effort in efforts %}
+    <tr {% if effort.rank == 1 %}style="color: var(--accent);"{% endif %}>
+      <td>{% if effort.rank == 1 %}PR{% endif %}</td>
+      <td style="text-align:left;"><a href="/activities/{{ effort.activity_id }}">{{ effort.activity_name }}</a></td>
+      <td>{{ effort.achieved_at | date_short }}</td>
+      <td>{{ effort.elapsed_time_s | duration }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<div class="empty-state">No efforts recorded yet for this segment.</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+{% if efforts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.1/chart.umd.min.js"></script>
+{% endif %}
+<script>
+  (function () {
+    var accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+    var secondary = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim();
+
+    {% if geojson %}
+    var geojson = {{ geojson | safe }};
+    var coords = geojson.coordinates.map(function (c) { return [c[1], c[0]]; });
+    var map = L.map('map');
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+      maxZoom: 19,
+    }).addTo(map);
+    var polyline = L.polyline(coords, { color: accent, weight: 4 }).addTo(map);
+    map.fitBounds(polyline.getBounds(), { padding: [16, 16] });
+    {% endif %}
+
+    {% if efforts %}
+    var trendPoints = [
+      {% for effort in efforts | reverse %}
+      { t: "{{ effort.achieved_at | date_short }}", v: {{ effort.elapsed_time_s }} },
+      {% endfor %}
+    ];
+    var canvas = document.getElementById('chart-trend');
+    if (canvas) {
+      new Chart(canvas, {
+        type: 'line',
+        data: {
+          labels: trendPoints.map(function (p) { return p.t; }),
+          datasets: [{
+            label: 'Elapsed time (s)',
+            data: trendPoints.map(function (p) { return p.v; }),
+            borderColor: accent,
+            borderWidth: 1.5,
+            pointRadius: 3,
+            pointBackgroundColor: accent,
+            tension: 0.15,
+          }],
+        },
+        options: {
+          responsive: true,
+          animation: false,
+          scales: {
+            x: { ticks: { color: secondary, maxRotation: 0 } },
+            y: { ticks: { color: secondary }, grid: { color: 'rgba(128,131,158,0.15)' } },
+          },
+          plugins: { legend: { display: false } },
+        },
+      });
+    }
+    {% endif %}
+  })();
+</script>
+{% endblock %}

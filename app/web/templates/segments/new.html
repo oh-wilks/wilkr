@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}New segment — wilkr{% endblock %}
+
+{% block head %}
+{% if activity %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+{% endif %}
+{% endblock %}
+
+{% block content %}
+{% if not activity %}
+<div class="empty-state">
+  Pick an activity first — open one from <a href="/activities">the activity list</a> and use
+  "Create segment from this activity".
+</div>
+{% else %}
+<div class="detail-header">
+  <h1>New segment</h1>
+  <div class="meta">from <a href="/activities/{{ activity.id }}">{{ activity.name }}</a></div>
+</div>
+
+{% if error %}
+<div class="sync-health sync-health-failed" style="margin-bottom:16px;">{{ error }}</div>
+{% endif %}
+
+<p style="color:var(--text-secondary); font-size:13px;">
+  Click two points along the track to mark the segment's start and end. Click again to start over.
+</p>
+
+<div id="map"></div>
+
+<form method="post" action="/segments" id="segment-form" style="margin-top:16px;">
+  <input type="hidden" name="activity_id" value="{{ activity.id }}">
+  <input type="hidden" name="start_lat" id="start_lat">
+  <input type="hidden" name="start_lon" id="start_lon">
+  <input type="hidden" name="end_lat" id="end_lat">
+  <input type="hidden" name="end_lon" id="end_lon">
+
+  <div class="stat-grid" style="grid-template-columns: 2fr 1fr;">
+    <div class="stat-tile">
+      <label for="name" class="label">Name</label><br>
+      <input type="text" id="name" name="name" required style="width:100%; margin-top:6px; background:var(--bg); color:var(--text-primary); border:1px solid var(--border); border-radius:4px; padding:6px 8px; font-family:inherit;">
+    </div>
+    <div class="stat-tile">
+      <label for="sport_id" class="label">Sport</label><br>
+      <select id="sport_id" name="sport_id" style="width:100%; margin-top:6px; background:var(--bg); color:var(--text-primary); border:1px solid var(--border); border-radius:4px; padding:6px 8px; font-family:inherit;">
+        {% for sport in sports %}
+        <option value="{{ sport.id }}" {% if sport.id == activity.sport_id %}selected{% endif %}>{{ sport.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+
+  <button id="submit-btn" type="submit" class="theme-toggle" disabled style="margin-top:16px; cursor:not-allowed; opacity:0.5;">
+    Pick two points on the map first
+  </button>
+</form>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if activity %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script>
+  (function () {
+    var accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+    var danger = getComputedStyle(document.documentElement).getPropertyValue('--danger').trim();
+
+    var geojson = {{ geojson | safe }};
+    var coords = geojson ? geojson.coordinates.map(function (c) { return [c[1], c[0]]; }) : [];
+
+    var map = L.map('map');
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+      maxZoom: 19,
+    }).addTo(map);
+
+    if (coords.length) {
+      var track = L.polyline(coords, { color: accent, weight: 3 }).addTo(map);
+      map.fitBounds(track.getBounds(), { padding: [16, 16] });
+    }
+
+    var picks = [];
+    var markers = [];
+    var submitBtn = document.getElementById('submit-btn');
+
+    function reset() {
+      picks = [];
+      markers.forEach(function (m) { map.removeLayer(m); });
+      markers = [];
+      submitBtn.disabled = true;
+      submitBtn.textContent = 'Pick two points on the map first';
+      submitBtn.style.cursor = 'not-allowed';
+      submitBtn.style.opacity = '0.5';
+    }
+
+    map.on('click', function (e) {
+      if (picks.length >= 2) reset();
+
+      picks.push(e.latlng);
+      var marker = L.circleMarker(e.latlng, {
+        radius: 7,
+        color: picks.length === 1 ? accent : danger,
+        fillColor: picks.length === 1 ? accent : danger,
+        fillOpacity: 1,
+      }).addTo(map);
+      markers.push(marker);
+
+      if (picks.length === 1) {
+        document.getElementById('start_lat').value = e.latlng.lat;
+        document.getElementById('start_lon').value = e.latlng.lng;
+        submitBtn.textContent = 'Now pick the end point';
+      } else {
+        document.getElementById('end_lat').value = e.latlng.lat;
+        document.getElementById('end_lon').value = e.latlng.lng;
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Save segment';
+        submitBtn.style.cursor = 'pointer';
+        submitBtn.style.opacity = '1';
+      }
+    });
+  })();
+</script>
+{% endif %}
+{% endblock %}

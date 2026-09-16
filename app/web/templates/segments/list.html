@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Segments — wilkr{% endblock %}
+{% block content %}
+{% if not segments %}
+<div class="empty-state">No segments yet. Open an activity and use "Create segment from this activity" to make your first one.</div>
+{% else %}
+<div id="segment-list">
+  {% include "segments/_rows.html" %}
+</div>
+{% include "segments/_load_more.html" %}
+{% endif %}
+{% endblock %}

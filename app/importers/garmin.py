@@ -44,6 +44,7 @@ from app.importers.db_writer import to_naive_utc, write_track_streams_laps
 from app.importers.garmin_sport_mapping import resolve_sport
 from app.importers.parsers.fit import parse_fit
 from app.models import Activity, GarminSyncState, ImportEvent, Sport, User
+from app.segments.matching import match_activity_against_segments
 
 SOURCE = "garmin_sync"
 
@@ -284,6 +285,7 @@ async def run_once(interactive: bool = False) -> None:
 
     sport_cache: dict[str, int] = {}
     counts = {"success": 0, "failed": 0, "duplicate": 0}
+    new_activity_ids: list[int] = []
 
     for raw in activities:
         # activityId is typed as Optional in garminconnect's own schema for
@@ -334,6 +336,7 @@ async def run_once(interactive: bool = False) -> None:
                 )
                 await session.commit()
             counts["success"] += 1
+            new_activity_ids.append(activity_id)
         except Exception as exc:  # noqa: BLE001 — one bad activity must not stop the run
             message = _scrub_secrets(str(exc))[:1000]
             async with async_session() as session:
@@ -366,6 +369,19 @@ async def run_once(interactive: bool = False) -> None:
     else:
         await _record_run_result(run_started_at, "success", None, advance_cursor=True)
     print(f"Garmin sync done: {counts}")
+
+    segment_matches = 0
+    for activity_id in new_activity_ids:
+        try:
+            async with async_session() as session:
+                async with session.begin():
+                    efforts = await match_activity_against_segments(session, activity_id)
+                    segment_matches += len(efforts)
+        except Exception as exc:  # noqa: BLE001 — one bad match must not stop the rest
+            print(f"Segment matching failed for activity {activity_id}: {exc}")
+
+    if new_activity_ids:
+        print(f"Segment matches: {segment_matches}")
 
 
 async def run_loop(interval_s: int) -> None:

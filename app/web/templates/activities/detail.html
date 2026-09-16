@@ -29,6 +29,7 @@
 
 {% if geojson %}
 <div id="map"></div>
+<p style="margin: 8px 0 20px;"><a href="/segments/new?activity_id={{ activity.id }}">Create segment from this activity →</a></p>
 {% endif %}
 
 {% for type in ["heart_rate", "elevation", "speed", "cadence", "power"] %}

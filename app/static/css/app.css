@@ -33,6 +33,20 @@ header.nav .brand {
   color: var(--accent);
 }
 
+.nav-links {
+  display: flex;
+  gap: 16px;
+  margin-right: auto;
+  margin-left: 24px;
+}
+.nav-links a {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.nav-links a:hover {
+  color: var(--text-primary);
+}
+
 button.theme-toggle {
   background: var(--surface);
   border: 1px solid var(--border);
