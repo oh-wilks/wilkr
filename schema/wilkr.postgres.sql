@@ -1,6 +1,6 @@
 -- SQL dump generated using DBML (dbml.dbdiagram.io)
 -- Database: PostgreSQL
--- Generated at: 2026-09-16T04:24:16.831Z
+-- Generated at: 2026-09-16T05:53:34.958Z
 
 CREATE EXTENSION IF NOT EXISTS postgis;
 
@@ -64,7 +64,9 @@ CREATE TABLE "activities" (
   "elapsed_time_s" int NOT NULL,
   "distance_m" float NOT NULL,
   "elevation_gain_m" float,
-  "avg_hr" int
+  "avg_hr" int,
+  "max_hr" int,
+  "calories_kcal" int
 );
 
 CREATE TABLE "tracks" (
@@ -161,6 +163,8 @@ COMMENT ON COLUMN "activities"."equipment_id" IS 'nullable';
 COMMENT ON COLUMN "activities"."source" IS 'strava_import, garmin_sync, manual';
 
 COMMENT ON COLUMN "activities"."external_id" IS 'dedupe key from source';
+
+COMMENT ON COLUMN "activities"."max_hr" IS 'peak HR reached during this activity — distinct from users.max_hr, the training-zone ceiling';
 
 COMMENT ON COLUMN "tracks"."geom" IS 'SRID 4326';
 

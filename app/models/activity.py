@@ -36,6 +36,14 @@ class Activity(Base):
     distance_m: Mapped[float] = mapped_column(nullable=False)
     elevation_gain_m: Mapped[float | None] = mapped_column()
     avg_hr: Mapped[int | None] = mapped_column(Integer)
+    max_hr: Mapped[int | None] = mapped_column(
+        Integer,
+        comment=(
+            "peak HR reached during this activity — distinct from "
+            "users.max_hr, the training-zone ceiling"
+        ),
+    )
+    calories_kcal: Mapped[int | None] = mapped_column(Integer)
 
     __table_args__ = (
         Index(

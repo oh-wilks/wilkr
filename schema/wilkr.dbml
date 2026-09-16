@@ -67,6 +67,8 @@ Table activities {
   distance_m float [not null]
   elevation_gain_m float
   avg_hr int
+  max_hr int [note: 'peak HR reached during this activity — distinct from users.max_hr, the training-zone ceiling']
+  calories_kcal int
 
   indexes {
     (source, external_id) [unique, name: 'uq_activities_source_external_id']
