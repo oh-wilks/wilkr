@@ -10,7 +10,7 @@ from sqlalchemy import (
     String,
     Text,
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 
@@ -53,6 +53,17 @@ class Activity(Base):
         ),
     )
     calories_kcal: Mapped[int | None] = mapped_column(Integer)
+
+    # Unidirectional — the viewer only ever needs the activity -> children
+    # direction, so there's no back_populates on Sport/Equipment/Track/
+    # Stream/ActivityLap. String forward-refs resolve via the shared
+    # declarative registry (all models get imported by app/models/__init__),
+    # so no cross-module imports needed here.
+    sport: Mapped["Sport"] = relationship()
+    equipment: Mapped["Equipment | None"] = relationship()
+    track: Mapped["Track | None"] = relationship(uselist=False)
+    streams: Mapped[list["Stream"]] = relationship()
+    laps: Mapped[list["ActivityLap"]] = relationship()
 
     __table_args__ = (
         Index(

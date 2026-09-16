@@ -14,6 +14,7 @@ dependencies = [
     "fitdecode>=0.10",
     "gpxpy>=1.6",
     "tcxreader>=0.4",
+    "jinja2>=3.1",
 ]
 
 [build-system]

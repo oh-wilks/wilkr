@@ -1,0 +1,58 @@
+/* Palette from docs/design-tokens.md. Dark is the bare :root default —
+   this is a fitness log, most often opened after a workout, evening or
+   early morning — light overrides via prefers-color-scheme and an
+   explicit [data-theme] toggle (either direction can win). */
+
+:root {
+  --bg: #0d0b18;
+  --surface: #19152b;
+  --border: #292343;
+  --text-primary: #e2e4ed;
+  --text-secondary: #80839e;
+  --accent: #fca338;
+  --tag-bg: #1c1b30;
+  --tag-border: #39385d;
+
+  color-scheme: dark;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+    --bg: #f5f4f8;
+    --surface: #ffffff;
+    --border: #e1e0e8;
+    --text-primary: #12101a;
+    --text-secondary: #616377;
+    --accent: #d97306;
+    --tag-bg: #eae9f2;
+    --tag-border: #c3c1d5;
+
+    color-scheme: light;
+  }
+}
+
+:root[data-theme="light"] {
+  --bg: #f5f4f8;
+  --surface: #ffffff;
+  --border: #e1e0e8;
+  --text-primary: #12101a;
+  --text-secondary: #616377;
+  --accent: #d97306;
+  --tag-bg: #eae9f2;
+  --tag-border: #c3c1d5;
+
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --bg: #0d0b18;
+  --surface: #19152b;
+  --border: #292343;
+  --text-primary: #e2e4ed;
+  --text-secondary: #80839e;
+  --accent: #fca338;
+  --tag-bg: #1c1b30;
+  --tag-border: #39385d;
+
+  color-scheme: dark;
+}

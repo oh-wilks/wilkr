@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}{{ activity.name }} — wilkr{% endblock %}
+
+{% block head %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+{% endblock %}
+
+{% block content %}
+<div class="detail-header">
+  <h1>{{ activity.name }}</h1>
+  <div class="meta">
+    <span class="sport-tag">{{ activity.sport.name }}</span>
+    &nbsp;{{ activity.started_at | date }}
+    {% if activity.equipment %}&nbsp;·&nbsp;{{ activity.equipment.name }}{% endif %}
+  </div>
+  {% if activity.description %}
+  <p>{{ activity.description }}</p>
+  {% endif %}
+</div>
+
+<div class="stat-grid">
+  <div class="stat-tile"><div class="value">{{ activity.distance_m | distance }}</div><div class="label">Distance</div></div>
+  <div class="stat-tile"><div class="value">{{ activity.moving_time_s | duration }}</div><div class="label">Moving time</div></div>
+  <div class="stat-tile"><div class="value">{{ activity.elevation_gain_m | elevation }}</div><div class="label">Elevation gain</div></div>
+  <div class="stat-tile"><div class="value">{{ activity.avg_hr or "—" }}</div><div class="label">Avg HR</div></div>
+  <div class="stat-tile"><div class="value">{{ activity.max_hr or "—" }}</div><div class="label">Max HR</div></div>
+  <div class="stat-tile"><div class="value">{{ activity.calories_kcal or "—" }}</div><div class="label">Calories</div></div>
+</div>
+
+{% if geojson %}
+<div id="map"></div>
+{% endif %}
+
+{% for type in ["heart_rate", "elevation", "speed", "cadence", "power"] %}
+  {% if streams.get(type) %}
+  <div class="chart-card">
+    <div class="chart-label">{{ type.replace("_", " ") }}</div>
+    <canvas id="chart-{{ type }}" height="70"></canvas>
+  </div>
+  {% endif %}
+{% endfor %}
+
+{% if laps %}
+<table class="laps">
+  <thead>
+    <tr><th>Lap</th><th>Time</th><th>Distance</th><th>Avg speed</th><th>Max speed</th><th>Elevation Δ</th></tr>
+  </thead>
+  <tbody>
+    {% for lap in laps %}
+    <tr>
+      <td>{{ lap.lap_index }}</td>
+      <td>{{ lap.elapsed_time_s | duration }}</td>
+      <td>{{ lap.distance_m | distance }}</td>
+      <td>{{ lap.avg_speed_mps | speed }}</td>
+      <td>{{ lap.max_speed_mps | speed }}</td>
+      <td>{{ lap.elevation_change_m | elevation }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.1/chart.umd.min.js"></script>
+<script>
+  (function () {
+    var accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+    var secondary = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim();
+
+    {% if geojson %}
+    var geojson = {{ geojson | safe }};
+    var coords = geojson.coordinates.map(function (c) { return [c[1], c[0]]; });
+    var map = L.map('map');
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap contributors',
+      maxZoom: 19,
+    }).addTo(map);
+    var polyline = L.polyline(coords, { color: accent, weight: 3 }).addTo(map);
+    map.fitBounds(polyline.getBounds(), { padding: [16, 16] });
+    {% endif %}
+
+    var streams = {{ streams | tojson }};
+    var labelNames = {
+      heart_rate: 'Heart Rate (bpm)',
+      elevation: 'Elevation (m)',
+      speed: 'Speed (m/s)',
+      cadence: 'Cadence (rpm)',
+      power: 'Power (W)',
+    };
+    Object.keys(streams).forEach(function (type) {
+      var points = streams[type];
+      if (!points || !points.length) return;
+      var canvas = document.getElementById('chart-' + type);
+      if (!canvas) return;
+      new Chart(canvas, {
+        type: 'line',
+        data: {
+          labels: points.map(function (p) { return (p.t || '').slice(11, 19); }),
+          datasets: [{
+            label: labelNames[type] || type,
+            data: points.map(function (p) { return p.v; }),
+            borderColor: accent,
+            borderWidth: 1.5,
+            pointRadius: 0,
+            tension: 0.15,
+          }],
+        },
+        options: {
+          responsive: true,
+          animation: false,
+          scales: {
+            x: { display: false },
+            y: { ticks: { color: secondary }, grid: { color: 'rgba(128,131,158,0.15)' } },
+          },
+          plugins: { legend: { display: false } },
+        },
+      });
+    });
+  })();
+</script>
+{% endblock %}

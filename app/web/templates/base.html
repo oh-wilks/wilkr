@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}wilkr{% endblock %}</title>
+  <link rel="stylesheet" href="/static/css/tokens.css">
+  <link rel="stylesheet" href="/static/css/app.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/htmx/1.9.12/htmx.min.js"></script>
+  {% block head %}{% endblock %}
+</head>
+<body>
+  <div class="shell">
+    <header class="nav">
+      <a class="brand" href="/activities">wilkr</a>
+      <button class="theme-toggle" id="theme-toggle" type="button">theme</button>
+    </header>
+    {% block content %}{% endblock %}
+  </div>
+  <script>
+    (function () {
+      var root = document.documentElement;
+      var toggle = document.getElementById('theme-toggle');
+      var stored = null;
+      try { stored = localStorage.getItem('wilkr-theme'); } catch (e) {}
+      if (stored) root.setAttribute('data-theme', stored);
+
+      toggle.addEventListener('click', function () {
+        var current = root.getAttribute('data-theme');
+        var next = current === 'dark' ? 'light' : 'dark';
+        root.setAttribute('data-theme', next);
+        try { localStorage.setItem('wilkr-theme', next); } catch (e) {}
+      });
+    })();
+  </script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

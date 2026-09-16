@@ -1,0 +1,8 @@
+{% extends "base.html" %}
+{% block title %}Activities — wilkr{% endblock %}
+{% block content %}
+<div id="activity-list">
+  {% include "activities/_rows.html" %}
+</div>
+{% include "activities/_load_more.html" %}
+{% endblock %}

@@ -1,0 +1,8 @@
+{% if has_more %}
+<button
+  id="load-more"
+  hx-get="/activities/rows?offset={{ next_offset }}"
+  hx-target="#load-more"
+  hx-swap="outerHTML"
+>Load more</button>
+{% endif %}

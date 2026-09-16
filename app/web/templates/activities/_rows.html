@@ -1,0 +1,10 @@
+{% for activity in activities %}
+<div class="activity-row">
+  <span class="sport-tag">{{ activity.sport.name }}</span>
+  <span class="name"><a href="/activities/{{ activity.id }}">{{ activity.name }}</a></span>
+  <span class="date">{{ activity.started_at | date_short }}</span>
+  <span class="stat">{{ activity.distance_m | distance }}</span>
+  <span class="stat">{{ activity.moving_time_s | duration }}</span>
+  <span class="stat">{{ activity.elevation_gain_m | elevation }}</span>
+</div>
+{% endfor %}
