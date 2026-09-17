@@ -31,8 +31,37 @@ def to_naive_utc(value: datetime.datetime) -> datetime.datetime:
     return value
 
 
+def _fill_missing_elevations(points: list[TrackPoint]) -> list[float]:
+    """A genuinely missing elevation reading defaulting to 0 reads as "sea
+    level" in the geometry, which shows up as a fake plunge in any
+    elevation-derived stat (gain, grade, min/max — see
+    app/segments/stats.py). Linearly interpolate across gaps between the
+    nearest real readings instead; points before the first (or after the
+    last) real reading hold that nearest value rather than extrapolating.
+    """
+    elevations: list[float | None] = [p.ele for p in points]
+    n = len(elevations)
+    known = [i for i, e in enumerate(elevations) if e is not None]
+    if not known:
+        return [0.0] * n
+
+    result = list(elevations)
+    for i in range(known[0]):
+        result[i] = elevations[known[0]]
+    for i in range(known[-1] + 1, n):
+        result[i] = elevations[known[-1]]
+    for a, b in zip(known, known[1:]):
+        if b - a <= 1:
+            continue
+        start_e, end_e = elevations[a], elevations[b]
+        for i in range(a + 1, b):
+            result[i] = start_e + (end_e - start_e) * (i - a) / (b - a)
+    return result  # type: ignore[return-value]
+
+
 def points_to_linestring_z(points: list[TrackPoint]) -> WKTElement:
-    coords = ", ".join(f"{p.lon} {p.lat} {p.ele or 0}" for p in points)
+    elevations = _fill_missing_elevations(points)
+    coords = ", ".join(f"{p.lon} {p.lat} {e}" for p, e in zip(points, elevations))
     return WKTElement(f"LINESTRING Z({coords})", srid=4326)
 
 

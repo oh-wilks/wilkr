@@ -1,7 +1,7 @@
 import datetime
 
 from geoalchemy2 import Geometry
-from sqlalchemy import DateTime, ForeignKey, Identity, Integer, String, func
+from sqlalchemy import DateTime, ForeignKey, Identity, Index, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -44,7 +44,7 @@ class SegmentEffort(Base):
 
     id: Mapped[int] = mapped_column(Integer, Identity(), primary_key=True)
     segment_id: Mapped[int] = mapped_column(
-        Integer, ForeignKey("segments.id"), nullable=False
+        Integer, ForeignKey("segments.id", ondelete="CASCADE"), nullable=False
     )
     activity_id: Mapped[int] = mapped_column(
         Integer, ForeignKey("activities.id"), nullable=False
@@ -54,11 +54,21 @@ class SegmentEffort(Base):
 
     activity: Mapped["Activity"] = relationship()
 
-    __table_args__ = {
-        "comment": (
-            "PR status is computed on read — RANK() OVER (PARTITION BY "
-            "segment_id, activity.user_id ORDER BY elapsed_time_s) — not "
-            "stored, so backfilled/out-of-order imports can never leave a "
-            "stale is_pr flag."
-        )
-    }
+    __table_args__ = (
+        Index(
+            "ix_segment_efforts_segment_id_elapsed_time_s",
+            "segment_id",
+            "elapsed_time_s",
+        ),
+        {
+            "comment": (
+                "PR status is computed on read — RANK() OVER (PARTITION BY "
+                "segment_id, activity.user_id ORDER BY elapsed_time_s) — not "
+                "stored, so backfilled/out-of-order imports can never leave a "
+                "stale is_pr flag. segment_id FK is ON DELETE CASCADE — "
+                "efforts are a deterministic computation over (segment "
+                "geometry × existing activities), reproducible via recreate "
+                "+ rescan, not primary data."
+            )
+        },
+    )

@@ -32,37 +32,44 @@ rather than after.
    column existed. Unblocks editing a segment's start/end points (Phase B,
    needs *some* activity's track to render the slider against) and computing
    elevation stats on the fly (next item).
-2. **Elevation: compute on the fly, don't store it.** `Segment.geom` stays a
-   plain (2D) `LINESTRING` — no migration needed there. Once
-   `source_activity_id` exists, derive elevation-based stats at read time by
-   re-running `ST_LineSubstring` against the *source track's* `LINESTRINGZ`
-   geometry (locating the segment's own start/end points on it via
-   `ST_LineLocatePoint`), then extracting Z values from that. Avoids
-   duplicating data that already exists on the source activity, and can
-   never drift out of sync with it. Cheap enough at this app's scale to
-   recompute per page view rather than cache.
-3. **`points_to_linestring_z`'s `p.ele or 0` gap still matters here.** A
-   genuinely missing elevation reading collapses to 0 (sea level) in
-   `Track.geom` — already a known limitation, but once segment elevation
-   stats are derived from that same source-track geometry (previous item),
-   a missing reading mid-segment would show as a fake plunge to 0m and
-   corrupt gain/grade calculations. Worth fixing before Phase C ships.
-4. **`ON DELETE CASCADE` from `segment_efforts` to `segments`, plus a real
-   confirmation on the delete route.** Efforts aren't primary data — they're
-   a deterministic computation over (segment geometry × existing
-   activities), so deleting a segment and recreating it with the same
-   start/end reproduces the exact same effort rows via rescan. Nothing is
-   actually unrecoverable, unlike deleting an activity's raw recording. So:
-   cascade at the DB level (correct FK semantics, one clean delete
-   statement instead of the two manual ones used by hand all session), but
-   the delete *route* should show "this removes N effort records — rebuild
-   by recreating this segment and rescanning, won't happen automatically"
-   before confirming, so blast radius is visible even though it's
-   reproducible.
-5. **No index on `segment_efforts(segment_id, elapsed_time_s)`.** Both the
-   segment-detail ranking query and the activity-panel query sort by this.
-   Fine at current scale (personal log, low hundreds of efforts), but cheap
-   to add now before it's a real cost.
+2. ✅ **Done (2026-09-17).** `app/segments/stats.py`,
+   `get_segment_elevation_stats(session, segment_id)` — re-runs
+   `ST_LineSubstring` against the source activity's `LINESTRINGZ` track
+   (locating the segment's own start/end points on it via
+   `ST_LineLocatePoint`), extracts Z values, and returns distance, elevation
+   gain, average grade (net, see the definition note below), and min/max/
+   start/end elevation. Returns `None` gracefully for segments with no
+   `source_activity_id` (the SQL comparing against a NULL never matches, so
+   no separate pre-check needed) — verified against both a real segment
+   (6.6km, 203m gain, 2.37% avg grade, cross-checked by hand) and a legacy
+   one predating the column. Not wired into any template yet — that's
+   Phase C.
+3. ✅ **Done (2026-09-17).** `app/importers/db_writer.py`'s
+   `_fill_missing_elevations` — linearly interpolates a missing elevation
+   reading between the nearest real ones instead of defaulting to 0
+   (sea level), with edge readings held rather than extrapolated and an
+   all-missing track falling back to the old all-0 behavior (no real data
+   to interpolate from). Verified against six cases (all-real, middle gap,
+   leading gap, trailing gap, all-missing, single-point) plus the actual WKT
+   output. Only affects future imports — existing tracks in the DB aren't
+   retroactively corrected; a backfill (re-parsing source files, same shape
+   as `backfill_track_times.py`) would be a separate, not-yet-needed step.
+4. ✅ **Done (2026-09-18).** `segment_efforts_segment_id_fkey` is now
+   `ON DELETE CASCADE` (migration 0005 for the constraint + index, 0006 for
+   the table comment autogenerate caught out of sync — two migrations
+   because 0005 had already been applied before the comment mismatch was
+   noticed; can't edit an applied migration after the fact, just add the
+   next one). `POST /segments/{id}/delete` deletes the segment in one
+   statement, efforts cascade automatically. UI: a "delete" button next to
+   "rescan" on segment detail, native `confirm()` dialog dynamically
+   including the real effort count ("This removes 6 effort records...")
+   rather than a generic warning — no new confirmation-page flow needed for
+   something this reproducible. Verified end-to-end against a real segment
+   with 6 matched efforts: both rows gone after one delete call. This also
+   satisfies Phase B's "Delete" item below.
+5. ✅ **Done (2026-09-18).** `ix_segment_efforts_segment_id_elapsed_time_s`
+   added alongside the cascade change (migration 0005) — same migration,
+   no reason to split it from the FK work touching the same table.
 
 ## Phase B — segment CRUD
 
@@ -74,9 +81,7 @@ rather than after.
   and re-run `match_segment_against_activities`, same as a fresh creation.
   Worth a confirmation step ("this will recompute effort history") since it's
   a real, visible change to PR history.
-- **Delete**: confirmation prompt showing the effort count about to be
-  removed + cascade delete (Phase A.4) — see the reasoning there on why this
-  doesn't need soft-delete/archiving.
+- **Delete**: ✅ done as part of Phase A.4 above.
 
 ## Phase C — richer segment detail view
 

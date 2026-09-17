@@ -396,6 +396,22 @@ async def segment_rescan(
     return RedirectResponse(url=f"/segments/{segment_id}", status_code=303)
 
 
+@router.post("/segments/{segment_id}/delete")
+async def segment_delete(
+    request: Request, segment_id: int, db: AsyncSession = Depends(get_db)
+):
+    segment = await db.scalar(select(Segment).where(Segment.id == segment_id))
+    if segment is None:
+        return templates.TemplateResponse(
+            request, "segments/not_found.html", {}, status_code=404
+        )
+    # segment_efforts.segment_id is ON DELETE CASCADE (migration 0005) — one
+    # statement removes the segment and its effort history together.
+    await db.execute(text("DELETE FROM segments WHERE id = :segment_id"), {"segment_id": segment_id})
+    await db.commit()
+    return RedirectResponse(url="/segments", status_code=303)
+
+
 @router.get("/segments/{segment_id}")
 async def segment_detail(
     request: Request, segment_id: int, db: AsyncSession = Depends(get_db)
