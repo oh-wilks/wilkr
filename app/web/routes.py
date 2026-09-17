@@ -20,6 +20,7 @@ from app.models import (
     Track,
     User,
 )
+from app.segments.geometry import compute_segment_geometry
 from app.segments.matching import find_similar_segments, match_segment_against_activities
 from app.web.formatting import (
     decimate,
@@ -268,7 +269,7 @@ async def segment_create(
     db: AsyncSession = Depends(get_db),
 ):
     async def _rerender(
-        error: str | None, similar: list[dict] | None = None, fractions=None
+        error: str | None, similar: list[dict] | None = None, frac_pair=None
     ):
         activity = await db.scalar(
             select(Activity)
@@ -280,7 +281,7 @@ async def segment_create(
         )
         sports = list((await db.execute(select(Sport).order_by(Sport.name))).scalars().all())
         pending = None
-        if similar and fractions is not None:
+        if similar and frac_pair is not None:
             # Carry the original slider selection through the re-render —
             # without this, the slider resets to its full-range default,
             # and clicking "Save segment" again would silently create a
@@ -289,8 +290,8 @@ async def segment_create(
             pending = {
                 "name": name,
                 "sport_id": sport_id,
-                "start_frac": fractions.f1,
-                "end_frac": fractions.f2,
+                "start_frac": frac_pair[0],
+                "end_frac": frac_pair[1],
             }
         return templates.TemplateResponse(
             request,
@@ -305,60 +306,27 @@ async def segment_create(
             },
         )
 
-    fractions = (
-        await db.execute(
-            text(
-                """
-                SELECT
-                    ST_LineLocatePoint(ST_Force2D(t.geom), ST_SetSRID(ST_MakePoint(:start_lon, :start_lat), 4326)) AS f1,
-                    ST_LineLocatePoint(ST_Force2D(t.geom), ST_SetSRID(ST_MakePoint(:end_lon, :end_lat), 4326)) AS f2
-                FROM tracks t
-                WHERE t.activity_id = :activity_id
-                """
-            ),
-            {
-                "activity_id": activity_id,
-                "start_lat": start_lat,
-                "start_lon": start_lon,
-                "end_lat": end_lat,
-                "end_lon": end_lon,
-            },
-        )
-    ).first()
-
-    if fractions is None or abs(fractions.f1 - fractions.f2) < 1e-6:
+    result = await compute_segment_geometry(
+        db, activity_id, start_lat, start_lon, end_lat, end_lon
+    )
+    if result is None:
         return await _rerender(
             "Those two points are too close together — pick two points further apart along the track."
         )
-
-    # Compute the candidate geometry without inserting yet, so a near-
-    # duplicate can be flagged before it's committed to.
-    new_geom_wkt = await db.scalar(
-        text(
-            """
-            SELECT ST_AsText(ST_LineSubstring(
-                ST_Force2D(t.geom),
-                LEAST(CAST(:f1 AS double precision), CAST(:f2 AS double precision)),
-                GREATEST(CAST(:f1 AS double precision), CAST(:f2 AS double precision))
-            ))
-            FROM tracks t
-            WHERE t.activity_id = :activity_id
-            """
-        ),
-        {"activity_id": activity_id, "f1": fractions.f1, "f2": fractions.f2},
-    )
+    f1, f2, new_geom_wkt = result
 
     if not confirm_similar:
         similar = await find_similar_segments(db, new_geom_wkt, sport_id)
         if similar:
-            return await _rerender(None, similar, fractions)
+            return await _rerender(None, similar, (f1, f2))
 
-    # Not wrapped in `async with db.begin()` — the fractions SELECT above
-    # already auto-began a transaction on this session (SQLAlchemy 2.0
-    # autobegin), so an explicit .begin() here would raise "a transaction
-    # is already begun". Reuse the auto-begun transaction and commit it
-    # explicitly instead — get_db()'s session is closed (not committed) on
-    # request end, so this commit is what actually makes the write durable.
+    # Not wrapped in `async with db.begin()` — compute_segment_geometry's
+    # SELECT above already auto-began a transaction on this session
+    # (SQLAlchemy 2.0 autobegin), so an explicit .begin() here would raise
+    # "a transaction is already begun". Reuse the auto-begun transaction and
+    # commit it explicitly instead — get_db()'s session is closed (not
+    # committed) on request end, so this commit is what actually makes the
+    # write durable.
     new_id = (
         await db.execute(
             text(
@@ -382,6 +350,174 @@ async def segment_create(
     return RedirectResponse(url=f"/segments/{new_id}", status_code=303)
 
 
+@router.get("/segments/{segment_id}/edit")
+async def segment_edit_form(
+    request: Request, segment_id: int, db: AsyncSession = Depends(get_db)
+):
+    segment = await db.scalar(select(Segment).where(Segment.id == segment_id))
+    if segment is None:
+        return templates.TemplateResponse(
+            request, "segments/not_found.html", {}, status_code=404
+        )
+
+    if segment.source_activity_id is None:
+        return templates.TemplateResponse(
+            request,
+            "segments/new.html",
+            {
+                "activity": None,
+                "geojson": None,
+                "sports": [],
+                "error": None,
+                "similar_segments": None,
+                "pending": None,
+                "edit_unavailable": True,
+            },
+        )
+
+    activity = await db.scalar(
+        select(Activity)
+        .options(joinedload(Activity.sport))
+        .where(Activity.id == segment.source_activity_id)
+    )
+    geojson = await db.scalar(
+        select(func.ST_AsGeoJSON(Track.geom)).where(
+            Track.activity_id == segment.source_activity_id
+        )
+    )
+    sports = list((await db.execute(select(Sport).order_by(Sport.name))).scalars().all())
+
+    fractions = (
+        await db.execute(
+            text(
+                """
+                SELECT
+                    ST_LineLocatePoint(ST_Force2D(t.geom), ST_StartPoint(s.geom)) AS f1,
+                    ST_LineLocatePoint(ST_Force2D(t.geom), ST_EndPoint(s.geom)) AS f2
+                FROM tracks t, segments s
+                WHERE t.activity_id = s.source_activity_id AND s.id = :segment_id
+                """
+            ),
+            {"segment_id": segment_id},
+        )
+    ).first()
+
+    effort_count = await db.scalar(
+        text("SELECT count(*) FROM segment_efforts WHERE segment_id = :segment_id"),
+        {"segment_id": segment_id},
+    )
+
+    return templates.TemplateResponse(
+        request,
+        "segments/new.html",
+        {
+            "activity": activity,
+            "geojson": geojson,
+            "sports": sports,
+            "error": None,
+            "similar_segments": None,
+            "pending": {
+                "name": segment.name,
+                "sport_id": segment.sport_id,
+                "start_frac": fractions.f1,
+                "end_frac": fractions.f2,
+            },
+            "edit_segment_id": segment_id,
+            "existing_effort_count": effort_count,
+        },
+    )
+
+
+@router.post("/segments/{segment_id}/update")
+async def segment_update(
+    request: Request,
+    segment_id: int,
+    name: str = Form(...),
+    sport_id: int = Form(...),
+    start_lat: float = Form(...),
+    start_lon: float = Form(...),
+    end_lat: float = Form(...),
+    end_lon: float = Form(...),
+    confirm_similar: str | None = Form(None),
+    db: AsyncSession = Depends(get_db),
+):
+    segment = await db.scalar(select(Segment).where(Segment.id == segment_id))
+    if segment is None or segment.source_activity_id is None:
+        return templates.TemplateResponse(
+            request, "segments/not_found.html", {}, status_code=404
+        )
+    source_activity_id = segment.source_activity_id
+
+    async def _rerender(error: str | None, similar: list[dict] | None = None, frac_pair=None):
+        activity = await db.scalar(
+            select(Activity)
+            .options(joinedload(Activity.sport))
+            .where(Activity.id == source_activity_id)
+        )
+        geojson = await db.scalar(
+            select(func.ST_AsGeoJSON(Track.geom)).where(Track.activity_id == source_activity_id)
+        )
+        sports = list((await db.execute(select(Sport).order_by(Sport.name))).scalars().all())
+        effort_count = await db.scalar(
+            text("SELECT count(*) FROM segment_efforts WHERE segment_id = :segment_id"),
+            {"segment_id": segment_id},
+        )
+        pending = {"name": name, "sport_id": sport_id}
+        if frac_pair is not None:
+            pending["start_frac"], pending["end_frac"] = frac_pair
+        return templates.TemplateResponse(
+            request,
+            "segments/new.html",
+            {
+                "activity": activity,
+                "geojson": geojson,
+                "sports": sports,
+                "error": error,
+                "similar_segments": similar,
+                "pending": pending,
+                "edit_segment_id": segment_id,
+                "existing_effort_count": effort_count,
+            },
+        )
+
+    result = await compute_segment_geometry(
+        db, source_activity_id, start_lat, start_lon, end_lat, end_lon
+    )
+    if result is None:
+        return await _rerender(
+            "Those two points are too close together — pick two points further apart along the track."
+        )
+    f1, f2, new_geom_wkt = result
+
+    if not confirm_similar:
+        similar = await find_similar_segments(
+            db, new_geom_wkt, sport_id, exclude_segment_id=segment_id
+        )
+        if similar:
+            return await _rerender(None, similar, (f1, f2))
+
+    await db.execute(
+        text(
+            """
+            UPDATE segments SET name = :name, sport_id = :sport_id, geom = ST_GeomFromText(:geom_wkt, 4326)
+            WHERE id = :segment_id
+            """
+        ),
+        {"name": name, "sport_id": sport_id, "geom_wkt": new_geom_wkt, "segment_id": segment_id},
+    )
+    # The old geometry's effort history no longer describes this segment's
+    # new line — delete and let match_segment_against_activities rebuild it
+    # (a fresh scan, same as segment creation, not a partial patch).
+    await db.execute(
+        text("DELETE FROM segment_efforts WHERE segment_id = :segment_id"),
+        {"segment_id": segment_id},
+    )
+    await match_segment_against_activities(db, segment_id)
+    await db.commit()
+
+    return RedirectResponse(url=f"/segments/{segment_id}", status_code=303)
+
+
 @router.post("/segments/{segment_id}/rescan")
 async def segment_rescan(
     request: Request, segment_id: int, db: AsyncSession = Depends(get_db)
@@ -393,6 +529,28 @@ async def segment_rescan(
         )
     await match_segment_against_activities(db, segment_id)
     await db.commit()
+    return RedirectResponse(url=f"/segments/{segment_id}", status_code=303)
+
+
+@router.post("/segments/{segment_id}/rename")
+async def segment_rename(
+    request: Request,
+    segment_id: int,
+    name: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+):
+    segment = await db.scalar(select(Segment).where(Segment.id == segment_id))
+    if segment is None:
+        return templates.TemplateResponse(
+            request, "segments/not_found.html", {}, status_code=404
+        )
+    name = name.strip()
+    if name:
+        await db.execute(
+            text("UPDATE segments SET name = :name WHERE id = :segment_id"),
+            {"name": name, "segment_id": segment_id},
+        )
+        await db.commit()
     return RedirectResponse(url=f"/segments/{segment_id}", status_code=303)
 
 

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}New segment — wilkr{% endblock %}
+{% block title %}{{ "Edit segment" if edit_segment_id else "New segment" }} — wilkr{% endblock %}
 
 {% block head %}
 {% if activity %}
@@ -10,13 +10,21 @@
 {% block content %}
 {% if not activity %}
 <div class="empty-state">
+  {% if edit_unavailable %}
+  This segment was created before edit support existed, so there's no recorded source activity to
+  edit it from. You can delete it and create a new one instead.
+  {% else %}
   Pick an activity first — open one from <a href="/activities">the activity list</a> and use
   "Create segment from this activity".
+  {% endif %}
 </div>
 {% else %}
 <div class="detail-header">
-  <h1>New segment</h1>
-  <div class="meta">from <a href="/activities/{{ activity.id }}">{{ activity.name }}</a></div>
+  <h1>{{ "Edit segment" if edit_segment_id else "New segment" }}</h1>
+  <div class="meta">
+    {{ "editing from" if edit_segment_id else "from" }}
+    <a href="/activities/{{ activity.id }}">{{ activity.name }}</a>
+  </div>
 </div>
 
 {% if error %}
@@ -27,7 +35,8 @@
 <div class="sync-health sync-health-warning" style="margin-bottom:16px;">
   This looks similar to
   {% for seg in similar_segments %}<a href="/segments/{{ seg.id }}" target="_blank">{{ seg.name }}</a>{% if not loop.last %}, {% endif %}{% endfor %}
-  — same direction, substantial overlap. Hit "Save segment" again to create it anyway, or pick a different range above.
+  — same direction, substantial overlap. Hit "{{ "Save changes" if edit_segment_id else "Save segment" }}"
+  again to {{ "update it" if edit_segment_id else "create it" }} anyway, or pick a different range above.
 </div>
 {% endif %}
 
@@ -51,13 +60,20 @@
 </div>
 {% endif %}
 
-<form method="post" action="/segments" id="segment-form" style="margin-top:16px;">
+<form
+  method="post"
+  action="{{ '/segments/' ~ edit_segment_id ~ '/update' if edit_segment_id else '/segments' }}"
+  id="segment-form"
+  style="margin-top:16px;"
+>
+  {% if not edit_segment_id %}
   <input type="hidden" name="activity_id" value="{{ activity.id }}">
+  {% endif %}
   <input type="hidden" name="start_lat" id="start_lat">
   <input type="hidden" name="start_lon" id="start_lon">
   <input type="hidden" name="end_lat" id="end_lat">
   <input type="hidden" name="end_lon" id="end_lon">
-  {% if pending %}
+  {% if similar_segments %}
   <input type="hidden" name="confirm_similar" value="1">
   {% endif %}
 
@@ -210,14 +226,27 @@
       });
     }
 
+    var editMode = {{ "true" if edit_segment_id else "false" }};
+    var existingEffortCount = {{ existing_effort_count or 0 }};
+    var readyText = editMode ? 'Save changes' : 'Save segment';
+
     var submitBtn = document.getElementById('submit-btn');
     var segmentForm = document.getElementById('segment-form');
     if (segmentForm) {
-      // A slow request with no feedback reads as "nothing happened", which
-      // invites a second click — disabling immediately on submit (rather
-      // than waiting for a response) is what actually prevents that second
-      // click from firing a duplicate POST, not just a cosmetic spinner.
-      segmentForm.addEventListener('submit', function () {
+      segmentForm.addEventListener('submit', function (submitEvent) {
+        if (editMode && existingEffortCount > 0) {
+          var msg = 'Saving this will delete ' + existingEffortCount + ' existing effort record' +
+            (existingEffortCount !== 1 ? 's' : '') + ' and rescan against your history. Continue?';
+          if (!confirm(msg)) {
+            submitEvent.preventDefault();
+            return;
+          }
+        }
+        // A slow request with no feedback reads as "nothing happened",
+        // which invites a second click — disabling immediately on submit
+        // (rather than waiting for a response) is what actually prevents
+        // that second click from firing a duplicate POST, not just a
+        // cosmetic spinner.
         submitBtn.disabled = true;
         submitBtn.style.cursor = 'not-allowed';
         submitBtn.style.opacity = '0.5';
@@ -321,7 +350,7 @@
           submitBtn.disabled = false;
           submitBtn.style.cursor = 'pointer';
           submitBtn.style.opacity = '1';
-          submitBtn.textContent = 'Save segment';
+          submitBtn.textContent = readyText;
         } else {
           submitBtn.disabled = true;
           submitBtn.style.cursor = 'not-allowed';
@@ -381,10 +410,12 @@
       bindHandle(startHandle, true);
       bindHandle(endHandle, false);
 
-      {% if pending %}
-      // A similarity warning re-rendered this page — restore the original
-      // selection instead of defaulting to the full track, so resubmitting
-      // confirms what was actually picked, not an unrelated full-range one.
+      {% if pending and pending.start_frac is defined %}
+      // Editing an existing segment, or a similarity warning re-rendered
+      // this page — restore the known selection instead of defaulting to
+      // the full track, so resubmitting confirms what was actually picked
+      // (or the segment's current range, for an edit's initial load)
+      // rather than an unrelated full-range one.
       startIdx = distanceToIndex({{ pending.start_frac }} * totalDist);
       endIdx = distanceToIndex({{ pending.end_frac }} * totalDist);
       {% endif %}

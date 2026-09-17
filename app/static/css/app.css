@@ -108,7 +108,9 @@ button.theme-toggle:hover { color: var(--text-primary); }
 .action-menu-items form {
   margin: 0;
 }
-.action-menu-items button {
+.action-menu-items button,
+.action-menu-items a {
+  display: block;
   width: 100%;
   text-align: left;
   background: none;
@@ -119,9 +121,12 @@ button.theme-toggle:hover { color: var(--text-primary); }
   font-family: inherit;
   font-size: 12px;
   cursor: pointer;
+  box-sizing: border-box;
 }
-.action-menu-items button:hover {
+.action-menu-items button:hover,
+.action-menu-items a:hover {
   background: var(--bg);
+  color: var(--text-primary);
 }
 .action-menu-danger {
   color: var(--danger) !important;

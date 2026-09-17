@@ -73,17 +73,50 @@ rather than after.
 
 ## Phase B — segment CRUD
 
-- **Rename**: trivial, no dependencies — a name field + `UPDATE`.
-- **Edit start/end**: reuse the exact creation-flow slider UI, pre-populated
-  from `source_activity_id`'s track (Phase A.1) and the segment's current
-  geometry. Editing the geometry invalidates existing `segment_efforts` (they
-  were computed against the old line) — the update path should delete them
-  and re-run `match_segment_against_activities`, same as a fresh creation.
-  Worth a confirmation step ("this will recompute effort history") since it's
-  a real, visible change to PR history.
+- ✅ **Done (2026-09-18).** `POST /segments/{id}/rename` + a "Rename" item in
+  the action menu (`prompt()` dialog, same lightweight native-dialog pattern
+  as delete's `confirm()`). One real bug caught and fixed along the way:
+  the current name needs to reach the JS prompt safely regardless of what
+  characters it contains — passing it through `tojson` directly into an
+  inline `onsubmit=""` attribute broke as soon as the name had a quote in
+  it (tried both a real segment name and a synthetic "Rider's "Big" Climb"
+  test case). Fixed by putting the name in a `data-current-name` attribute
+  instead, which Jinja's default HTML-escaping handles correctly for any
+  character, read back via `.dataset` in JS (which auto-decodes) rather
+  than trying to build a safe inline JS string literal by hand.
+- ✅ **Done (2026-09-18).** `GET /segments/{id}/edit` renders the exact
+  creation-flow template (`segments/new.html`, now mode-aware) pre-seeded
+  from the segment's current geometry — extracted the fraction/geometry SQL
+  both create and edit need into `app/segments/geometry.py` rather than
+  duplicating it, since that duplication risk is exactly what bit
+  `db_writer.py` before it was shared between strava.py/garmin.py. Legacy
+  segments with no `source_activity_id` get a plain explanatory message
+  instead (delete + recreate is the only path for those). `POST
+  /segments/{id}/update` deletes the old effort history and reruns
+  `match_segment_against_activities` against the new geometry — a real,
+  native `confirm()` naming the exact effort count about to be deleted
+  fires before submit, same lightweight-dialog pattern as delete/rename.
+  `find_similar_segments` gained `exclude_segment_id` so an edit doesn't
+  flag itself as a duplicate of its own pre-edit shape.
+
+  Two real bugs caught during testing, not just design decisions: (1) the
+  original `{% if pending %}` check for the `confirm_similar` hidden field
+  would have silently skipped the duplicate-check on every edit's *first*
+  save, since edit mode always sets `pending` (for slider pre-fill) even
+  outside the warning case — fixed by keying off `similar_segments`
+  instead, which only exists for the warning itself; (2) the exclude-self
+  SQL (`:exclude_id IS NULL OR s.id != :exclude_id`) hit the same
+  asyncpg "could not determine data type" error the `LEAST`/`GREATEST`
+  bind params hit earlier this session — same fix, explicit
+  `CAST(:exclude_id AS integer)`. Verified end-to-end: create → edit form
+  correctly restores the current range → submit with a genuinely different
+  range → name and geometry both updated, old efforts gone, 8 fresh ones
+  rescanned (not stale) → resubmitting the same new range doesn't
+  false-positive against itself.
 - ✅ **Done (2026-09-18).** "…" action menu on segment detail —
-  `<details class="action-menu">`/`<summary>` dropdown holding Rescan and
-  Delete (Edit will join once it exists). Close-on-outside-click is the one
+  `<details class="action-menu">`/`<summary>` dropdown holding Rename,
+  Edit start/end, Rescan, and Delete — all four CRUD/maintenance actions in
+  one place now that all of them exist. Close-on-outside-click is the one
   bit of real JS needed (native `<details>` doesn't do this itself) — added
   to `base.html` alongside the existing theme-toggle script rather than
   duplicated per-template, since this is a reusable component other pages

@@ -14,6 +14,15 @@
     <details class="action-menu">
       <summary class="theme-toggle">&hellip;</summary>
       <div class="action-menu-items">
+        <form
+          method="post"
+          action="/segments/{{ segment.id }}/rename"
+          data-current-name="{{ segment.name }}"
+          onsubmit="return renameSegment(this);"
+        >
+          <button type="submit">Rename</button>
+        </form>
+        <a href="/segments/{{ segment.id }}/edit">Edit start/end</a>
         <form method="post" action="/segments/{{ segment.id }}/rescan">
           <button type="submit">Rescan</button>
         </form>
@@ -65,6 +74,20 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.1/chart.umd.min.js"></script>
 {% endif %}
 <script>
+  // Global (not in the IIFE below) — inline onsubmit="" handlers look up
+  // functions on window, and this is only used by that one attribute.
+  function renameSegment(form) {
+    var currentName = form.dataset.currentName;
+    var next = prompt('New name:', currentName);
+    if (!next || !next.trim() || next.trim() === currentName) return false;
+    var input = document.createElement('input');
+    input.type = 'hidden';
+    input.name = 'name';
+    input.value = next.trim();
+    form.appendChild(input);
+    return true;
+  }
+
   (function () {
     var accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
     var secondary = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim();

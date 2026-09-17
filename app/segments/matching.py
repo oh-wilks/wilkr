@@ -303,6 +303,7 @@ _SIMILAR_CANDIDATES = text(
     SELECT s.id, s.name
     FROM segments s
     WHERE s.sport_id = :sport_id
+      AND (CAST(:exclude_id AS integer) IS NULL OR s.id != CAST(:exclude_id AS integer))
       AND ST_DWithin(s.geom::geography, ST_GeomFromText(:new_geom_wkt, 4326)::geography, :buffer_m)
     """
 )
@@ -339,16 +340,26 @@ def _longest_nondecreasing(fractions: list[float]) -> int:
 
 
 async def find_similar_segments(
-    session: AsyncSession, new_geom_wkt: str, sport_id: int
+    session: AsyncSession,
+    new_geom_wkt: str,
+    sport_id: int,
+    exclude_segment_id: int | None = None,
 ) -> list[dict]:
     """Existing same-sport segments that substantially overlap the proposed
     new geometry in the same direction — a climb and its own descent on the
     same road share every point but not the direction, so they correctly
-    don't flag each other."""
+    don't flag each other. exclude_segment_id skips a segment against
+    itself when checking an edit (it would otherwise always "match" its own
+    pre-edit geometry at ~100%)."""
     candidates = (
         await session.execute(
             _SIMILAR_CANDIDATES,
-            {"sport_id": sport_id, "new_geom_wkt": new_geom_wkt, "buffer_m": SIMILARITY_BUFFER_M},
+            {
+                "sport_id": sport_id,
+                "new_geom_wkt": new_geom_wkt,
+                "buffer_m": SIMILARITY_BUFFER_M,
+                "exclude_id": exclude_segment_id,
+            },
         )
     ).all()
 
