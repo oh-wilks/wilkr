@@ -11,6 +11,10 @@
   <div class="meta">
     <span class="sport-tag">{{ segment.sport.name }}</span>
     &nbsp;{{ efforts | length }} effort{{ "s" if efforts | length != 1 else "" }}
+    &nbsp;
+    <form method="post" action="/segments/{{ segment.id }}/rescan" style="display:inline;">
+      <button type="submit" class="theme-toggle" style="font-size:11px; padding:3px 8px;">rescan</button>
+    </form>
   </div>
 </div>
 
@@ -69,9 +73,16 @@
     {% if efforts %}
     var trendPoints = [
       {% for effort in efforts | reverse %}
-      { t: "{{ effort.achieved_at | date_short }}", v: {{ effort.elapsed_time_s }} },
+      { t: "{{ effort.achieved_at | date_short }}", v: {{ effort.elapsed_time_s }}, pr: {{ "true" if effort.rank == 1 else "false" }} },
       {% endfor %}
     ];
+    function hexToRgba(hex, alpha) {
+      hex = hex.trim().replace('#', '');
+      var r = parseInt(hex.substring(0, 2), 16);
+      var g = parseInt(hex.substring(2, 4), 16);
+      var b = parseInt(hex.substring(4, 6), 16);
+      return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
+    }
     var canvas = document.getElementById('chart-trend');
     if (canvas) {
       new Chart(canvas, {
@@ -81,11 +92,12 @@
           datasets: [{
             label: 'Elapsed time (s)',
             data: trendPoints.map(function (p) { return p.v; }),
-            borderColor: accent,
-            borderWidth: 1.5,
-            pointRadius: 3,
-            pointBackgroundColor: accent,
-            tension: 0.15,
+            showLine: false,
+            pointRadius: trendPoints.map(function (p) { return p.pr ? 5 : 4; }),
+            pointBackgroundColor: trendPoints.map(function (p) {
+              return p.pr ? hexToRgba(accent, 0.95) : hexToRgba(secondary, 0.55);
+            }),
+            pointBorderWidth: 0,
           }],
         },
         options: {

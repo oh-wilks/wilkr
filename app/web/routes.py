@@ -303,6 +303,20 @@ async def segment_create(
     return RedirectResponse(url=f"/segments/{new_id}", status_code=303)
 
 
+@router.post("/segments/{segment_id}/rescan")
+async def segment_rescan(
+    request: Request, segment_id: int, db: AsyncSession = Depends(get_db)
+):
+    segment = await db.scalar(select(Segment).where(Segment.id == segment_id))
+    if segment is None:
+        return templates.TemplateResponse(
+            request, "segments/not_found.html", {}, status_code=404
+        )
+    await match_segment_against_activities(db, segment_id)
+    await db.commit()
+    return RedirectResponse(url=f"/segments/{segment_id}", status_code=303)
+
+
 @router.get("/segments/{segment_id}")
 async def segment_detail(
     request: Request, segment_id: int, db: AsyncSession = Depends(get_db)
