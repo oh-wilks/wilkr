@@ -20,7 +20,7 @@ from app.models import (
     Track,
     User,
 )
-from app.segments.matching import match_segment_against_activities
+from app.segments.matching import find_similar_segments, match_segment_against_activities
 from app.web.formatting import (
     decimate,
     format_date,
@@ -264,8 +264,47 @@ async def segment_create(
     start_lon: float = Form(...),
     end_lat: float = Form(...),
     end_lon: float = Form(...),
+    confirm_similar: str | None = Form(None),
     db: AsyncSession = Depends(get_db),
 ):
+    async def _rerender(
+        error: str | None, similar: list[dict] | None = None, fractions=None
+    ):
+        activity = await db.scalar(
+            select(Activity)
+            .options(joinedload(Activity.sport))
+            .where(Activity.id == activity_id)
+        )
+        geojson = await db.scalar(
+            select(func.ST_AsGeoJSON(Track.geom)).where(Track.activity_id == activity_id)
+        )
+        sports = list((await db.execute(select(Sport).order_by(Sport.name))).scalars().all())
+        pending = None
+        if similar and fractions is not None:
+            # Carry the original slider selection through the re-render —
+            # without this, the slider resets to its full-range default,
+            # and clicking "Save segment" again would silently create a
+            # segment from the wrong (full-track) range instead of
+            # confirming what was actually picked.
+            pending = {
+                "name": name,
+                "sport_id": sport_id,
+                "start_frac": fractions.f1,
+                "end_frac": fractions.f2,
+            }
+        return templates.TemplateResponse(
+            request,
+            "segments/new.html",
+            {
+                "activity": activity,
+                "geojson": geojson,
+                "sports": sports,
+                "error": error,
+                "similar_segments": similar,
+                "pending": pending,
+            },
+        )
+
     fractions = (
         await db.execute(
             text(
@@ -288,25 +327,31 @@ async def segment_create(
     ).first()
 
     if fractions is None or abs(fractions.f1 - fractions.f2) < 1e-6:
-        activity = await db.scalar(
-            select(Activity)
-            .options(joinedload(Activity.sport))
-            .where(Activity.id == activity_id)
+        return await _rerender(
+            "Those two points are too close together — pick two points further apart along the track."
         )
-        geojson = await db.scalar(
-            select(func.ST_AsGeoJSON(Track.geom)).where(Track.activity_id == activity_id)
-        )
-        sports = list((await db.execute(select(Sport).order_by(Sport.name))).scalars().all())
-        return templates.TemplateResponse(
-            request,
-            "segments/new.html",
-            {
-                "activity": activity,
-                "geojson": geojson,
-                "sports": sports,
-                "error": "Those two points are too close together — pick two points further apart along the track.",
-            },
-        )
+
+    # Compute the candidate geometry without inserting yet, so a near-
+    # duplicate can be flagged before it's committed to.
+    new_geom_wkt = await db.scalar(
+        text(
+            """
+            SELECT ST_AsText(ST_LineSubstring(
+                ST_Force2D(t.geom),
+                LEAST(CAST(:f1 AS double precision), CAST(:f2 AS double precision)),
+                GREATEST(CAST(:f1 AS double precision), CAST(:f2 AS double precision))
+            ))
+            FROM tracks t
+            WHERE t.activity_id = :activity_id
+            """
+        ),
+        {"activity_id": activity_id, "f1": fractions.f1, "f2": fractions.f2},
+    )
+
+    if not confirm_similar:
+        similar = await find_similar_segments(db, new_geom_wkt, sport_id)
+        if similar:
+            return await _rerender(None, similar, fractions)
 
     # Not wrapped in `async with db.begin()` — the fractions SELECT above
     # already auto-began a transaction on this session (SQLAlchemy 2.0
@@ -318,24 +363,16 @@ async def segment_create(
         await db.execute(
             text(
                 """
-                INSERT INTO segments (name, sport_id, geom)
-                SELECT :name, :sport_id,
-                    ST_LineSubstring(
-                        ST_Force2D(t.geom),
-                        LEAST(CAST(:f1 AS double precision), CAST(:f2 AS double precision)),
-                        GREATEST(CAST(:f1 AS double precision), CAST(:f2 AS double precision))
-                    )
-                FROM tracks t
-                WHERE t.activity_id = :activity_id
+                INSERT INTO segments (name, sport_id, geom, source_activity_id)
+                VALUES (:name, :sport_id, ST_GeomFromText(:geom_wkt, 4326), :activity_id)
                 RETURNING id
                 """
             ),
             {
                 "name": name,
                 "sport_id": sport_id,
+                "geom_wkt": new_geom_wkt,
                 "activity_id": activity_id,
-                "f1": fractions.f1,
-                "f2": fractions.f2,
             },
         )
     ).scalar_one()

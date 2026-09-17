@@ -67,6 +67,12 @@ button.theme-toggle:hover { color: var(--text-primary); }
 .sync-health-failed {
   color: var(--danger);
 }
+.sync-health-warning {
+  color: var(--accent);
+}
+.sync-health-warning a {
+  text-decoration: underline;
+}
 
 /* activity list */
 

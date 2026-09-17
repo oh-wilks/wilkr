@@ -285,3 +285,90 @@ async def match_segment_against_activities(
         if effort is not None:
             efforts.append(effort)
     return efforts
+
+
+# --------------------------------------------------------------------------
+# Near-duplicate detection, run at segment-creation time only (warn, not
+# block — a near-duplicate is sometimes intentional, e.g. a deliberately
+# adjusted climb boundary). Same sampling philosophy as the matcher above,
+# but simpler: no time dimension, since we're comparing two static
+# geometries rather than a segment against a GPS recording.
+# --------------------------------------------------------------------------
+
+SIMILARITY_BUFFER_M = 15
+SIMILARITY_THRESHOLD = 0.8
+
+_SIMILAR_CANDIDATES = text(
+    """
+    SELECT s.id, s.name
+    FROM segments s
+    WHERE s.sport_id = :sport_id
+      AND ST_DWithin(s.geom::geography, ST_GeomFromText(:new_geom_wkt, 4326)::geography, :buffer_m)
+    """
+)
+
+_SIMILAR_SAMPLES = text(
+    """
+    WITH samples AS (
+        SELECT i, ST_LineInterpolatePoint(ST_GeomFromText(:new_geom_wkt, 4326), i::float / :n_samples) AS sample_point
+        FROM generate_series(0, :n_samples) AS i
+    )
+    SELECT samples.i,
+           ST_LineLocatePoint(s.geom, samples.sample_point) AS frac,
+           ST_Distance(
+               samples.sample_point::geography,
+               ST_LineInterpolatePoint(s.geom, ST_LineLocatePoint(s.geom, samples.sample_point))::geography
+           ) AS dist_m
+    FROM samples, segments s
+    WHERE s.id = :existing_id
+    ORDER BY samples.i
+    """
+)
+
+
+def _longest_nondecreasing(fractions: list[float]) -> int:
+    """Length of the longest non-decreasing run, in original order.
+    O(n^2) — trivial at N_SAMPLES+1 elements."""
+    n = len(fractions)
+    lengths = [1] * n
+    for j in range(n):
+        for k in range(j):
+            if fractions[k] <= fractions[j] and lengths[k] + 1 > lengths[j]:
+                lengths[j] = lengths[k] + 1
+    return max(lengths) if n else 0
+
+
+async def find_similar_segments(
+    session: AsyncSession, new_geom_wkt: str, sport_id: int
+) -> list[dict]:
+    """Existing same-sport segments that substantially overlap the proposed
+    new geometry in the same direction — a climb and its own descent on the
+    same road share every point but not the direction, so they correctly
+    don't flag each other."""
+    candidates = (
+        await session.execute(
+            _SIMILAR_CANDIDATES,
+            {"sport_id": sport_id, "new_geom_wkt": new_geom_wkt, "buffer_m": SIMILARITY_BUFFER_M},
+        )
+    ).all()
+
+    similar = []
+    for existing_id, name in candidates:
+        rows = (
+            await session.execute(
+                _SIMILAR_SAMPLES,
+                {
+                    "new_geom_wkt": new_geom_wkt,
+                    "existing_id": existing_id,
+                    "n_samples": N_SAMPLES,
+                },
+            )
+        ).all()
+        required = math.ceil(SIMILARITY_THRESHOLD * len(rows))
+        fractions = [frac for _, frac, dist in rows if dist is not None and dist <= SIMILARITY_BUFFER_M]
+        if len(fractions) < required:
+            continue
+        if _longest_nondecreasing(fractions) < required:
+            continue
+        similar.append({"id": existing_id, "name": name})
+    return similar

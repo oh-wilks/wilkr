@@ -23,6 +23,14 @@
 <div class="sync-health sync-health-failed" style="margin-bottom:16px;">{{ error }}</div>
 {% endif %}
 
+{% if similar_segments %}
+<div class="sync-health sync-health-warning" style="margin-bottom:16px;">
+  This looks similar to
+  {% for seg in similar_segments %}<a href="/segments/{{ seg.id }}" target="_blank">{{ seg.name }}</a>{% if not loop.last %}, {% endif %}{% endfor %}
+  — same direction, substantial overlap. Hit "Save segment" again to create it anyway, or pick a different range above.
+</div>
+{% endif %}
+
 <p style="color:var(--text-secondary); font-size:13px;">
   Drag the two handles below the elevation profile to pick the segment's start and end.
 </p>
@@ -49,17 +57,20 @@
   <input type="hidden" name="start_lon" id="start_lon">
   <input type="hidden" name="end_lat" id="end_lat">
   <input type="hidden" name="end_lon" id="end_lon">
+  {% if pending %}
+  <input type="hidden" name="confirm_similar" value="1">
+  {% endif %}
 
   <div class="stat-grid" style="grid-template-columns: 2fr 1fr;">
     <div class="stat-tile">
       <label for="name" class="label">Name</label><br>
-      <input type="text" id="name" name="name" required style="width:100%; margin-top:6px; background:var(--bg); color:var(--text-primary); border:1px solid var(--border); border-radius:4px; padding:6px 8px; font-family:inherit;">
+      <input type="text" id="name" name="name" required value="{{ pending.name if pending else '' }}" style="width:100%; margin-top:6px; background:var(--bg); color:var(--text-primary); border:1px solid var(--border); border-radius:4px; padding:6px 8px; font-family:inherit;">
     </div>
     <div class="stat-tile">
       <label for="sport_id" class="label">Sport</label><br>
       <select id="sport_id" name="sport_id" style="width:100%; margin-top:6px; background:var(--bg); color:var(--text-primary); border:1px solid var(--border); border-radius:4px; padding:6px 8px; font-family:inherit;">
         {% for sport in sports %}
-        <option value="{{ sport.id }}" {% if sport.id == activity.sport_id %}selected{% endif %}>{{ sport.name }}</option>
+        <option value="{{ sport.id }}" {% if pending and sport.id == pending.sport_id %}selected{% elif not pending and sport.id == activity.sport_id %}selected{% endif %}>{{ sport.name }}</option>
         {% endfor %}
       </select>
     </div>
@@ -200,6 +211,19 @@
     }
 
     var submitBtn = document.getElementById('submit-btn');
+    var segmentForm = document.getElementById('segment-form');
+    if (segmentForm) {
+      // A slow request with no feedback reads as "nothing happened", which
+      // invites a second click — disabling immediately on submit (rather
+      // than waiting for a response) is what actually prevents that second
+      // click from firing a duplicate POST, not just a cosmetic spinner.
+      segmentForm.addEventListener('submit', function () {
+        submitBtn.disabled = true;
+        submitBtn.style.cursor = 'not-allowed';
+        submitBtn.style.opacity = '0.5';
+        submitBtn.textContent = 'Saving…';
+      });
+    }
     var sliderEl = document.getElementById('dual-slider');
 
     if (latlngs.length > 1 && sliderEl) {
@@ -356,6 +380,15 @@
 
       bindHandle(startHandle, true);
       bindHandle(endHandle, false);
+
+      {% if pending %}
+      // A similarity warning re-rendered this page — restore the original
+      // selection instead of defaulting to the full track, so resubmitting
+      // confirms what was actually picked, not an unrelated full-range one.
+      startIdx = distanceToIndex({{ pending.start_frac }} * totalDist);
+      endIdx = distanceToIndex({{ pending.end_frac }} * totalDist);
+      {% endif %}
+
       render();
     }
   })();
