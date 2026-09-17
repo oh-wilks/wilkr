@@ -81,6 +81,13 @@ rather than after.
   and re-run `match_segment_against_activities`, same as a fresh creation.
   Worth a confirmation step ("this will recompute effort history") since it's
   a real, visible change to PR history.
+- ✅ **Done (2026-09-18).** "…" action menu on segment detail —
+  `<details class="action-menu">`/`<summary>` dropdown holding Rescan and
+  Delete (Edit will join once it exists). Close-on-outside-click is the one
+  bit of real JS needed (native `<details>` doesn't do this itself) — added
+  to `base.html` alongside the existing theme-toggle script rather than
+  duplicated per-template, since this is a reusable component other pages
+  will adopt the same way, not page-specific state. No new dependency.
 - **Delete**: ✅ done as part of Phase A.4 above.
 
 ## Phase C — richer segment detail view

@@ -11,19 +11,21 @@
   <div class="meta">
     <span class="sport-tag">{{ segment.sport.name }}</span>
     &nbsp;{{ efforts | length }} effort{{ "s" if efforts | length != 1 else "" }}
-    &nbsp;
-    <form method="post" action="/segments/{{ segment.id }}/rescan" style="display:inline;">
-      <button type="submit" class="theme-toggle" style="font-size:11px; padding:3px 8px;">rescan</button>
-    </form>
-    &nbsp;
-    <form
-      method="post"
-      action="/segments/{{ segment.id }}/delete"
-      style="display:inline;"
-      onsubmit="return confirm('This removes {{ efforts | length }} effort record{{ "s" if efforts | length != 1 else "" }} along with the segment. They can be rebuilt by recreating this segment and rescanning, but that won\'t happen automatically. Delete anyway?');"
-    >
-      <button type="submit" class="theme-toggle" style="font-size:11px; padding:3px 8px; color: var(--danger); border-color: var(--danger);">delete</button>
-    </form>
+    <details class="action-menu">
+      <summary class="theme-toggle">&hellip;</summary>
+      <div class="action-menu-items">
+        <form method="post" action="/segments/{{ segment.id }}/rescan">
+          <button type="submit">Rescan</button>
+        </form>
+        <form
+          method="post"
+          action="/segments/{{ segment.id }}/delete"
+          onsubmit="return confirm('This removes {{ efforts | length }} effort record{{ "s" if efforts | length != 1 else "" }} along with the segment. They can be rebuilt by recreating this segment and rescanning, but that won\'t happen automatically. Delete anyway?');"
+        >
+          <button type="submit" class="action-menu-danger">Delete</button>
+        </form>
+      </div>
+    </details>
   </div>
 </div>
 

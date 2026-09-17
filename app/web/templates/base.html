@@ -47,6 +47,15 @@
         root.setAttribute('data-theme', next);
         try { localStorage.setItem('wilkr-theme', next); } catch (e) {}
       });
+
+      // Shared "..." action-menu behavior (segment detail today, other
+      // pages as they adopt the same <details class="action-menu"> pattern)
+      // — native <details> has no built-in close-on-outside-click.
+      document.addEventListener('click', function (e) {
+        document.querySelectorAll('details.action-menu[open]').forEach(function (d) {
+          if (!d.contains(e.target)) d.removeAttribute('open');
+        });
+      });
     })();
   </script>
   {% block scripts %}{% endblock %}
