@@ -46,6 +46,21 @@ templates.env.filters["speed"] = format_speed
 templates.env.filters["time_ago"] = format_time_ago
 templates.env.filters["rank_label"] = format_rank
 
+
+def static_url(path: str) -> str:
+    # Cache-bust on the file's own mtime — browsers cache /static/* with no
+    # Cache-Control header, so an unchanged URL after a CSS/JS edit can
+    # silently keep serving the stale copy until a hard refresh.
+    file_path = pathlib.Path("app/static") / path
+    try:
+        version = int(file_path.stat().st_mtime)
+    except OSError:
+        version = 0
+    return f"/static/{path}?v={version}"
+
+
+templates.env.globals["static_url"] = static_url
+
 PAGE_SIZE = 30
 
 

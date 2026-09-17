@@ -24,8 +24,7 @@
 {% endif %}
 
 <p style="color:var(--text-secondary); font-size:13px;">
-  Click two points along the track to mark the segment's start and end. Click again to start over.
-  Hover the map or the elevation profile to preview a point before committing to it.
+  Drag the two handles below the elevation profile to pick the segment's start and end.
 </p>
 
 <div id="map"></div>
@@ -34,6 +33,13 @@
 <div class="chart-card" style="margin-top:16px;">
   <div class="chart-label">elevation profile</div>
   <canvas id="chart-elevation" height="70"></canvas>
+  <div class="dual-slider" id="dual-slider">
+    <div class="dual-slider-track"></div>
+    <div class="dual-slider-range" id="slider-range"></div>
+    <div class="dual-slider-handle" id="handle-start" role="slider" tabindex="0" aria-label="Segment start"></div>
+    <div class="dual-slider-handle dual-slider-handle-end" id="handle-end" role="slider" tabindex="0" aria-label="Segment end"></div>
+  </div>
+  <div id="selected-distance" style="color:var(--text-secondary); font-size:12px; margin-top:4px;"></div>
 </div>
 {% endif %}
 
@@ -60,7 +66,7 @@
   </div>
 
   <button id="submit-btn" type="submit" class="theme-toggle" disabled style="margin-top:16px; cursor:not-allowed; opacity:0.5;">
-    Pick two points on the map first
+    Adjust the handles above first
   </button>
 </form>
 {% endif %}
@@ -92,11 +98,19 @@
     var elevations = rawCoords.map(function (c) { return c[2]; });
 
     // Cumulative along-track distance (meters) per vertex, for the
-    // elevation profile's x-axis and for locating a snapped point.
+    // elevation profile's x-axis and the "N km selected" readout.
     var cumDist = [0];
     for (var i = 1; i < latlngs.length; i++) {
       cumDist.push(cumDist[i - 1] + latlngs[i - 1].distanceTo(latlngs[i]));
     }
+
+    // Declared here (not inside the slider block below) so the chart's
+    // segment-fill callback can close over the current selection — the
+    // chart is constructed before the slider block runs.
+    var lastIndex = latlngs.length - 1;
+    var totalDist = cumDist[lastIndex] || 0;
+    var startIdx = 0;
+    var endIdx = lastIndex;
 
     var map = L.map('map');
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -105,68 +119,66 @@
     }).addTo(map);
 
     if (latlngs.length) {
-      var track = L.polyline(latlngs, { color: accent, weight: 3 }).addTo(map);
+      var track = L.polyline(latlngs, { color: accent, weight: 3, opacity: 0.5 }).addTo(map);
       map.fitBounds(track.getBounds(), { padding: [16, 16] });
     }
 
-    // Nearest point on the rendered track to a given latlng, computed in
-    // pixel space (zoom-independent). Returns the snapped latlng plus its
-    // along-track distance and elevation, interpolated between the two
-    // bracketing vertices — this is what a click actually commits, so the
-    // marker placed is always exactly on the line, never an off-track click.
-    function nearestOnTrack(latlng) {
-      if (latlngs.length < 2) return null;
-      var p = map.latLngToLayerPoint(latlng);
-      var best = null;
-      for (var i = 0; i < latlngs.length - 1; i++) {
-        var a = map.latLngToLayerPoint(latlngs[i]);
-        var b = map.latLngToLayerPoint(latlngs[i + 1]);
-        var dx = b.x - a.x, dy = b.y - a.y;
-        var lenSq = dx * dx + dy * dy;
-        var t = lenSq === 0 ? 0 : Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / lenSq));
-        var projX = a.x + dx * t, projY = a.y + dy * t;
-        var d = Math.hypot(p.x - projX, p.y - projY);
-        if (!best || d < best.dist) {
-          best = { dist: d, index: i, t: t, layerPoint: L.point(projX, projY) };
-        }
-      }
-      var dAlong = cumDist[best.index] + best.t * (cumDist[best.index + 1] - cumDist[best.index]);
-      var eAt = elevations.length
-        ? elevations[best.index] + best.t * (elevations[best.index + 1] - elevations[best.index])
-        : null;
-      return { latlng: map.layerPointToLatLng(best.layerPoint), dist: dAlong, elev: eAt };
-    }
+    // The chart's x/y axes zoom to a window around the current [s, e]
+    // selection, padded on each side for context (see render() below) — so
+    // most of the visible curve is the selection, and can just be filled
+    // directly (no masked "selected" overlay dataset). Zooming the y-axis
+    // to the visible elevations too (not just x) is what actually delivers
+    // the accuracy win: a subtle bump is invisible against a whole-track
+    // y-range, but obvious once the axis rescales to a narrow sub-range.
+    var playheadPlugin = {
+      id: 'playhead',
+      afterDraw: function (chart) {
+        var xs = chart.$playheadXs;
+        if (!xs || !xs.length) return;
+        var xScale = chart.scales.x;
+        var area = chart.chartArea;
+        var ctx = chart.ctx;
+        ctx.save();
+        ctx.lineWidth = 1.5;
+        xs.forEach(function (p) {
+          var px = xScale.getPixelForValue(p.x);
+          if (px < area.left || px > area.right) return;
+          ctx.strokeStyle = p.color;
+          ctx.beginPath();
+          ctx.moveTo(px, area.top);
+          ctx.lineTo(px, area.bottom);
+          ctx.stroke();
+        });
+        ctx.restore();
+      },
+    };
 
     var elevCanvas = document.getElementById('chart-elevation');
     var elevChart = null;
     if (elevCanvas && elevations.length > 1) {
       elevChart = new Chart(elevCanvas, {
         type: 'line',
+        plugins: [playheadPlugin],
         data: {
           datasets: [
             {
               label: 'elevation',
               data: elevations.map(function (e, i) { return { x: cumDist[i], y: e }; }),
               borderColor: secondary,
+              backgroundColor: 'transparent',
               borderWidth: 1.5,
               pointRadius: 0,
-              fill: false,
-            },
-            {
-              label: 'cursor',
-              data: [],
-              showLine: false,
-              pointRadius: 5,
-              pointBackgroundColor: accent,
-            },
-            {
-              label: 'selected',
-              data: [],
-              borderColor: 'transparent',
-              backgroundColor: hexToRgba(accent, 0.18),
-              pointRadius: 0,
               fill: 'origin',
-              spanGaps: false,
+              // Only the segment actually between the two handles gets
+              // filled — the padded context on either side stays an
+              // outline only, matching what "context, not selection"
+              // should look like.
+              segment: {
+                backgroundColor: function (ctx) {
+                  var inSelection = ctx.p0DataIndex >= startIdx && ctx.p1DataIndex <= endIdx;
+                  return inSelection ? hexToRgba(accent, 0.3) : 'transparent';
+                },
+              },
             },
           ],
         },
@@ -176,6 +188,8 @@
           scales: {
             x: {
               type: 'linear',
+              min: 0,
+              max: cumDist[cumDist.length - 1],
               ticks: { color: secondary, callback: function (v) { return (v / 1000).toFixed(1) + 'km'; } },
             },
             y: { ticks: { color: secondary }, grid: { color: 'rgba(128,131,158,0.15)' } },
@@ -185,87 +199,165 @@
       });
     }
 
-    var picks = [];
-    var markers = [];
-    var ghostMarker = null;
     var submitBtn = document.getElementById('submit-btn');
+    var sliderEl = document.getElementById('dual-slider');
 
-    function reset() {
-      picks = [];
-      markers.forEach(function (m) { map.removeLayer(m); });
-      markers = [];
-      submitBtn.disabled = true;
-      submitBtn.textContent = 'Pick two points on the map first';
-      submitBtn.style.cursor = 'not-allowed';
-      submitBtn.style.opacity = '0.5';
-      if (elevChart) {
-        elevChart.data.datasets[2].data = [];
-        elevChart.update('none');
-      }
-    }
+    if (latlngs.length > 1 && sliderEl) {
+      var rangeEl = document.getElementById('slider-range');
+      var startHandle = document.getElementById('handle-start');
+      var endHandle = document.getElementById('handle-end');
+      // The slider's own visible track mirrors the chart's zoom window
+      // (distance units), not the fixed full-track range — that's what
+      // gives finer drag precision as you zoom in. Starts as the full
+      // track, same as the chart's initial view.
+      var zoomLo = 0;
+      var zoomHi = totalDist;
 
-    function updateSelectedRange() {
-      if (!elevChart || picks.length < 2) return;
-      var lo = Math.min(picks[0].dist, picks[1].dist);
-      var hi = Math.max(picks[0].dist, picks[1].dist);
-      elevChart.data.datasets[2].data = elevations.map(function (e, i) {
-        return cumDist[i] >= lo && cumDist[i] <= hi ? { x: cumDist[i], y: e } : null;
-      });
-      elevChart.update('none');
-    }
-
-    map.on('mousemove', function (e) {
-      var snap = nearestOnTrack(e.latlng);
-      if (!snap) return;
-      if (!ghostMarker) {
-        ghostMarker = L.circleMarker(snap.latlng, {
-          radius: 5, color: accent, fillColor: accent, fillOpacity: 0.5, weight: 1,
-        }).addTo(map);
-      } else {
-        ghostMarker.setLatLng(snap.latlng);
-      }
-      if (elevChart) {
-        elevChart.data.datasets[1].data = snap.elev === null ? [] : [{ x: snap.dist, y: snap.elev }];
-        elevChart.update('none');
-      }
-    });
-
-    map.on('mouseout', function () {
-      if (ghostMarker) { map.removeLayer(ghostMarker); ghostMarker = null; }
-      if (elevChart) {
-        elevChart.data.datasets[1].data = [];
-        elevChart.update('none');
-      }
-    });
-
-    map.on('click', function (e) {
-      var snap = nearestOnTrack(e.latlng);
-      if (!snap) return;
-      if (picks.length >= 2) reset();
-
-      picks.push(snap);
-      var marker = L.circleMarker(snap.latlng, {
-        radius: 7,
-        color: picks.length === 1 ? accent : danger,
-        fillColor: picks.length === 1 ? accent : danger,
-        fillOpacity: 1,
+      var startMarker = L.circleMarker(latlngs[0], {
+        radius: 7, color: accent, fillColor: accent, fillOpacity: 1,
       }).addTo(map);
-      markers.push(marker);
+      var endMarker = L.circleMarker(latlngs[lastIndex], {
+        radius: 7, color: danger, fillColor: danger, fillOpacity: 1,
+      }).addTo(map);
+      var highlightLine = L.polyline(latlngs, { color: accent, weight: 6, opacity: 0.6 }).addTo(map);
 
-      if (picks.length === 1) {
-        document.getElementById('start_lat').value = snap.latlng.lat;
-        document.getElementById('start_lon').value = snap.latlng.lng;
-        submitBtn.textContent = 'Now pick the end point';
-      } else {
-        document.getElementById('end_lat').value = snap.latlng.lat;
-        document.getElementById('end_lon').value = snap.latlng.lng;
-        submitBtn.disabled = false;
-        submitBtn.textContent = 'Save segment';
-        submitBtn.style.cursor = 'pointer';
-        submitBtn.style.opacity = '1';
-        updateSelectedRange();
+      // Nearest track index whose cumulative distance is >= dist.
+      function distanceToIndex(dist) {
+        var lo = 0, hi = lastIndex;
+        while (lo < hi) {
+          var mid = (lo + hi) >> 1;
+          if (cumDist[mid] < dist) lo = mid + 1; else hi = mid;
+        }
+        return lo;
       }
-    });
+
+      function distToPercent(dist) {
+        return ((dist - zoomLo) / (zoomHi - zoomLo)) * 100;
+      }
+
+      function updateHandlePositions() {
+        var sPct = distToPercent(cumDist[startIdx]);
+        var ePct = distToPercent(cumDist[endIdx]);
+        startHandle.style.left = sPct + '%';
+        endHandle.style.left = ePct + '%';
+        rangeEl.style.left = sPct + '%';
+        rangeEl.style.width = (ePct - sPct) + '%';
+      }
+
+      function render() {
+        var s = startIdx, e = endIdx;
+
+        // Zoom window: the selection plus context padding on each side, so
+        // the chart (and now the slider, which mirrors it) shows a bit of
+        // track before/after the picked range, not just the range itself.
+        if (e > s) {
+          var selectionWidth = cumDist[e] - cumDist[s];
+          var contextPad = Math.max(selectionWidth * 0.15, totalDist * 0.02);
+          zoomLo = Math.max(0, cumDist[s] - contextPad);
+          zoomHi = Math.min(totalDist, cumDist[e] + contextPad);
+        }
+
+        updateHandlePositions();
+
+        startMarker.setLatLng(latlngs[s]);
+        endMarker.setLatLng(latlngs[e]);
+        highlightLine.setLatLngs(latlngs.slice(s, e + 1));
+
+        document.getElementById('start_lat').value = latlngs[s].lat;
+        document.getElementById('start_lon').value = latlngs[s].lng;
+        document.getElementById('end_lat').value = latlngs[e].lat;
+        document.getElementById('end_lon').value = latlngs[e].lng;
+
+        if (elevChart && e > s) {
+          elevChart.options.scales.x.min = zoomLo;
+          elevChart.options.scales.x.max = zoomHi;
+          elevChart.$playheadXs = [
+            { x: cumDist[s], color: accent },
+            { x: cumDist[e], color: danger },
+          ];
+
+          var loIdx = distanceToIndex(zoomLo);
+          var hiIdx = distanceToIndex(zoomHi);
+          var visible = elevations.slice(loIdx, hiIdx + 1);
+          var yMin = Math.min.apply(null, visible);
+          var yMax = Math.max.apply(null, visible);
+          var yPad = Math.max((yMax - yMin) * 0.1, 2);
+          elevChart.options.scales.y.min = yMin - yPad;
+          elevChart.options.scales.y.max = yMax + yPad;
+
+          elevChart.update('none');
+        }
+
+        var distEl = document.getElementById('selected-distance');
+        if (distEl) {
+          distEl.textContent = ((cumDist[e] - cumDist[s]) / 1000).toFixed(2) + ' km selected';
+        }
+
+        if (e > s) {
+          submitBtn.disabled = false;
+          submitBtn.style.cursor = 'pointer';
+          submitBtn.style.opacity = '1';
+          submitBtn.textContent = 'Save segment';
+        } else {
+          submitBtn.disabled = true;
+          submitBtn.style.cursor = 'not-allowed';
+          submitBtn.style.opacity = '0.5';
+          submitBtn.textContent = 'Drag the handles apart to select a range';
+        }
+      }
+
+      function percentToIndex(pct) {
+        var dist = zoomLo + (pct / 100) * (zoomHi - zoomLo);
+        return distanceToIndex(dist);
+      }
+
+      var renderScheduled = false;
+      function scheduleRender() {
+        if (renderScheduled) return;
+        renderScheduled = true;
+        requestAnimationFrame(function () {
+          renderScheduled = false;
+          render();
+        });
+      }
+
+      function bindHandle(handle, isStart) {
+        handle.addEventListener('pointerdown', function (downEvent) {
+          downEvent.preventDefault();
+          handle.setPointerCapture(downEvent.pointerId);
+
+          function onMove(moveEvent) {
+            var rect = sliderEl.getBoundingClientRect();
+            var pct = Math.max(0, Math.min(100, ((moveEvent.clientX - rect.left) / rect.width) * 100));
+            var idx = percentToIndex(pct);
+            if (isStart) {
+              startIdx = Math.max(0, Math.min(idx, endIdx));
+            } else {
+              endIdx = Math.min(lastIndex, Math.max(idx, startIdx));
+            }
+            // Throttled to once per frame — both because redrawing a
+            // ~thousand-point chart on every raw pointermove would fall
+            // behind and flicker, and because the handle position and the
+            // chart's zoom window must always be computed from the same
+            // snapshot: updating the handle immediately (against the
+            // *previous* window, before the new one's computed) is what
+            // made the slider visibly lag behind the chart's zoom.
+            scheduleRender();
+          }
+          function onUp(upEvent) {
+            handle.releasePointerCapture(upEvent.pointerId);
+            document.removeEventListener('pointermove', onMove);
+            document.removeEventListener('pointerup', onUp);
+          }
+          document.addEventListener('pointermove', onMove);
+          document.addEventListener('pointerup', onUp);
+        });
+      }
+
+      bindHandle(startHandle, true);
+      bindHandle(endHandle, false);
+      render();
+    }
   })();
 </script>
 {% endif %}
