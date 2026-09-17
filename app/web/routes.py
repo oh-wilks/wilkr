@@ -28,6 +28,7 @@ from app.web.formatting import (
     format_distance,
     format_duration,
     format_elevation,
+    format_rank,
     format_speed,
     format_time_ago,
 )
@@ -43,6 +44,7 @@ templates.env.filters["date"] = format_date
 templates.env.filters["date_short"] = format_date_short
 templates.env.filters["speed"] = format_speed
 templates.env.filters["time_ago"] = format_time_ago
+templates.env.filters["rank_label"] = format_rank
 
 PAGE_SIZE = 30
 
@@ -136,6 +138,30 @@ async def activity_detail(
         .all()
     )
 
+    segment_efforts = (
+        await db.execute(
+            text(
+                """
+                WITH ranked AS (
+                    SELECT se.id, se.segment_id, se.activity_id, se.elapsed_time_s, se.achieved_at,
+                           RANK() OVER (PARTITION BY se.segment_id ORDER BY se.elapsed_time_s) AS rank,
+                           COUNT(*) OVER (PARTITION BY se.segment_id) AS total_efforts
+                    FROM segment_efforts se
+                    JOIN activities a ON a.id = se.activity_id
+                    WHERE a.user_id = :user_id
+                )
+                SELECT r.id, r.segment_id, r.elapsed_time_s, r.rank, r.total_efforts,
+                       s.name AS segment_name, ST_AsGeoJSON(s.geom) AS geom_json
+                FROM ranked r
+                JOIN segments s ON s.id = r.segment_id
+                WHERE r.activity_id = :activity_id
+                ORDER BY r.id
+                """
+            ),
+            {"user_id": activity.user_id, "activity_id": activity_id},
+        )
+    ).all()
+
     return templates.TemplateResponse(
         request,
         "activities/detail.html",
@@ -144,6 +170,7 @@ async def activity_detail(
             "geojson": geojson,
             "streams": streams,
             "laps": laps,
+            "segment_efforts": segment_efforts,
         },
     )
 

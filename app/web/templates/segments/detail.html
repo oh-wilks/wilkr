@@ -58,16 +58,48 @@
     var accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
     var secondary = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim();
 
+    function computeBearing(a, b) {
+      var lat1 = a.lat * Math.PI / 180, lat2 = b.lat * Math.PI / 180;
+      var dLon = (b.lng - a.lng) * Math.PI / 180;
+      var y = Math.sin(dLon) * Math.cos(lat2);
+      var x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+      return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+    }
+
+    function addDirectionArrows(map, latlngs, cumDist) {
+      var total = cumDist[cumDist.length - 1];
+      [1, 2, 3, 4, 5].forEach(function (k) {
+        var target = total * k / 6;
+        var i = cumDist.findIndex(function (d) { return d >= target; });
+        if (i < 1) return;
+        var bearing = computeBearing(latlngs[i - 1], latlngs[i]);
+        L.marker(latlngs[i], {
+          icon: L.divIcon({
+            className: '',
+            html: '<div class="direction-arrow" style="transform: rotate(' + bearing + 'deg);">&#9650;</div>',
+            iconSize: [14, 14],
+          }),
+          interactive: false,
+          keyboard: false,
+        }).addTo(map);
+      });
+    }
+
     {% if geojson %}
     var geojson = {{ geojson | safe }};
-    var coords = geojson.coordinates.map(function (c) { return [c[1], c[0]]; });
+    var latlngs = geojson.coordinates.map(function (c) { return L.latLng(c[1], c[0]); });
+    var cumDist = [0];
+    for (var i = 1; i < latlngs.length; i++) {
+      cumDist.push(cumDist[i - 1] + latlngs[i - 1].distanceTo(latlngs[i]));
+    }
     var map = L.map('map');
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap contributors',
       maxZoom: 19,
     }).addTo(map);
-    var polyline = L.polyline(coords, { color: accent, weight: 4 }).addTo(map);
+    var polyline = L.polyline(latlngs, { color: accent, weight: 4 }).addTo(map);
     map.fitBounds(polyline.getBounds(), { padding: [16, 16] });
+    addDirectionArrows(map, latlngs, cumDist);
     {% endif %}
 
     {% if efforts %}
@@ -83,6 +115,16 @@
       var b = parseInt(hex.substring(4, 6), 16);
       return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
     }
+    function formatDuration(seconds) {
+      seconds = Math.round(seconds);
+      var hours = Math.floor(seconds / 3600);
+      var minutes = Math.floor((seconds % 3600) / 60);
+      var secs = seconds % 60;
+      if (hours) {
+        return hours + ':' + String(minutes).padStart(2, '0') + ':' + String(secs).padStart(2, '0');
+      }
+      return minutes + ':' + String(secs).padStart(2, '0');
+    }
     var canvas = document.getElementById('chart-trend');
     if (canvas) {
       new Chart(canvas, {
@@ -90,7 +132,7 @@
         data: {
           labels: trendPoints.map(function (p) { return p.t; }),
           datasets: [{
-            label: 'Elapsed time (s)',
+            label: 'Elapsed time',
             data: trendPoints.map(function (p) { return p.v; }),
             showLine: false,
             pointRadius: trendPoints.map(function (p) { return p.pr ? 5 : 4; }),
@@ -105,9 +147,15 @@
           animation: false,
           scales: {
             x: { ticks: { color: secondary, maxRotation: 0 } },
-            y: { ticks: { color: secondary }, grid: { color: 'rgba(128,131,158,0.15)' } },
+            y: {
+              ticks: { color: secondary, callback: formatDuration },
+              grid: { color: 'rgba(128,131,158,0.15)' },
+            },
           },
-          plugins: { legend: { display: false } },
+          plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: { label: function (ctx) { return formatDuration(ctx.parsed.y); } } },
+          },
         },
       });
     }

@@ -32,6 +32,23 @@
 <p style="margin: 8px 0 20px;"><a href="/segments/new?activity_id={{ activity.id }}">Create segment from this activity →</a></p>
 {% endif %}
 
+{% if segment_efforts %}
+<table class="laps">
+  <thead>
+    <tr><th>Rank</th><th>Segment</th><th>Time</th></tr>
+  </thead>
+  <tbody>
+    {% for effort in segment_efforts %}
+    <tr data-segment-id="{{ effort.segment_id }}" {% if effort.rank == 1 %}style="color: var(--accent);"{% endif %}>
+      <td>{{ effort.rank | rank_label(effort.total_efforts) }}</td>
+      <td style="text-align:left;"><a href="/segments/{{ effort.segment_id }}">{{ effort.segment_name }}</a></td>
+      <td>{{ effort.elapsed_time_s | duration }}</td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+
 {% for type in ["heart_rate", "elevation", "speed", "cadence", "power"] %}
   {% if streams.get(type) %}
   <div class="chart-card">
@@ -69,17 +86,69 @@
   (function () {
     var accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
     var secondary = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim();
+    var danger = getComputedStyle(document.documentElement).getPropertyValue('--danger').trim();
+
+    function computeBearing(a, b) {
+      var lat1 = a.lat * Math.PI / 180, lat2 = b.lat * Math.PI / 180;
+      var dLon = (b.lng - a.lng) * Math.PI / 180;
+      var y = Math.sin(dLon) * Math.cos(lat2);
+      var x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLon);
+      return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+    }
+
+    function addDirectionArrows(map, latlngs, cumDist) {
+      var total = cumDist[cumDist.length - 1];
+      [1, 2, 3, 4, 5].forEach(function (k) {
+        var target = total * k / 6;
+        var i = cumDist.findIndex(function (d) { return d >= target; });
+        if (i < 1) return;
+        var bearing = computeBearing(latlngs[i - 1], latlngs[i]);
+        L.marker(latlngs[i], {
+          icon: L.divIcon({
+            className: '',
+            html: '<div class="direction-arrow" style="transform: rotate(' + bearing + 'deg);">&#9650;</div>',
+            iconSize: [14, 14],
+          }),
+          interactive: false,
+          keyboard: false,
+        }).addTo(map);
+      });
+    }
 
     {% if geojson %}
     var geojson = {{ geojson | safe }};
-    var coords = geojson.coordinates.map(function (c) { return [c[1], c[0]]; });
+    var latlngs = geojson.coordinates.map(function (c) { return L.latLng(c[1], c[0]); });
+    var cumDist = [0];
+    for (var i = 1; i < latlngs.length; i++) {
+      cumDist.push(cumDist[i - 1] + latlngs[i - 1].distanceTo(latlngs[i]));
+    }
     var map = L.map('map');
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap contributors',
       maxZoom: 19,
     }).addTo(map);
-    var polyline = L.polyline(coords, { color: accent, weight: 3 }).addTo(map);
+    var polyline = L.polyline(latlngs, { color: accent, weight: 3 }).addTo(map);
     map.fitBounds(polyline.getBounds(), { padding: [16, 16] });
+    addDirectionArrows(map, latlngs, cumDist);
+
+    var segmentPolylines = {};
+    {% for effort in segment_efforts %}
+    segmentPolylines[{{ effort.segment_id }}] = L.polyline(
+      ({{ effort.geom_json | safe }}).coordinates.map(function (c) { return [c[1], c[0]]; }),
+      { color: danger, weight: 6, opacity: 0 }
+    ).addTo(map);
+    {% endfor %}
+
+    document.querySelectorAll('tr[data-segment-id]').forEach(function (row) {
+      var poly = segmentPolylines[parseInt(row.dataset.segmentId, 10)];
+      if (!poly) return;
+      row.addEventListener('mouseenter', function () {
+        poly.setStyle({ opacity: 1 }).bringToFront();
+      });
+      row.addEventListener('mouseleave', function () {
+        poly.setStyle({ opacity: 0 });
+      });
+    });
     {% endif %}
 
     var streams = {{ streams | tojson }};

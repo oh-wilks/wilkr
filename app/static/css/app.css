@@ -232,6 +232,18 @@ table.laps th {
   font-weight: normal;
 }
 
+.direction-arrow {
+  color: var(--accent);
+  font-size: 14px;
+  line-height: 14px;
+  text-shadow: 0 0 2px var(--bg), 0 0 2px var(--bg);
+}
+
+table.laps tbody tr[data-segment-id]:hover {
+  background: var(--surface);
+  cursor: pointer;
+}
+
 .empty-state {
   color: var(--text-secondary);
   padding: 24px;

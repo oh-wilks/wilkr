@@ -65,6 +65,19 @@ def format_time_ago(value: datetime.datetime | None) -> str:
     return f"{seconds // 86400}d ago"
 
 
+def format_rank(rank: int, total: int) -> str:
+    if rank == 1:
+        return "PR"
+    return f"{_ordinal(rank)} best of {total}"
+
+
+def _ordinal(n: int) -> str:
+    if 11 <= (n % 100) <= 13:
+        return f"{n}th"
+    suffix = {1: "st", 2: "nd", 3: "rd"}.get(n % 10, "th")
+    return f"{n}{suffix}"
+
+
 def decimate(points: list, max_points: int = 500) -> list:
     """Even-stride downsampling — some FIT-derived streams have 5000+
     points, which is more resolution than a chart at typical widths can
