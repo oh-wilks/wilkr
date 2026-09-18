@@ -278,6 +278,9 @@
       // track, same as the chart's initial view.
       var zoomLo = 0;
       var zoomHi = totalDist;
+      // True for the duration of an active handle drag. The zoom window
+      // above must NOT be recomputed while this is true — see render().
+      var dragging = false;
 
       var startMarker = L.circleMarker(latlngs[0], {
         radius: 7, color: accent, fillColor: accent, fillOpacity: 1,
@@ -314,9 +317,18 @@
         var s = startIdx, e = endIdx;
 
         // Zoom window: the selection plus context padding on each side, so
-        // the chart (and now the slider, which mirrors it) shows a bit of
-        // track before/after the picked range, not just the range itself.
-        if (e > s) {
+        // the chart (and the slider, which mirrors it) shows a bit of track
+        // before/after the picked range, not just the range itself. This
+        // must NOT run while a handle is actively being dragged: it feeds
+        // the mouse-to-index mapping (percentToIndex, below) right back
+        // into the value that mapping is producing, which is an unstable
+        // feedback loop — nearly any cursor position then makes the window
+        // (and the handle) run away to one extreme or the other instead of
+        // tracking the cursor. Freezing it for the drag's duration, and
+        // only re-tightening it once the handle is released, keeps the
+        // mapping stable during a drag while still zooming in for a finer
+        // *next* adjustment.
+        if (!dragging && e > s) {
           var selectionWidth = cumDist[e] - cumDist[s];
           var contextPad = Math.max(selectionWidth * 0.15, totalDist * 0.02);
           zoomLo = Math.max(0, cumDist[s] - contextPad);
@@ -391,6 +403,7 @@
         handle.addEventListener('pointerdown', function (downEvent) {
           downEvent.preventDefault();
           handle.setPointerCapture(downEvent.pointerId);
+          dragging = true;
 
           function onMove(moveEvent) {
             var rect = sliderEl.getBoundingClientRect();
@@ -414,6 +427,11 @@
             handle.releasePointerCapture(upEvent.pointerId);
             document.removeEventListener('pointermove', onMove);
             document.removeEventListener('pointerup', onUp);
+            dragging = false;
+            // Re-tighten the zoom window now that the drag has settled, so
+            // the next drag (e.g. refining the other handle) starts from a
+            // more precise view instead of whatever was frozen mid-drag.
+            scheduleRender();
           }
           document.addEventListener('pointermove', onMove);
           document.addEventListener('pointerup', onUp);
