@@ -4,10 +4,27 @@ Unlike sport_mapping.py (built from a real 825-activity Strava export),
 this one is NOT verified against real Garmin sync data — there isn't any
 yet. It's a best-effort mapping using Garmin's known, documented typeKey
 vocabulary, aimed at reusing the same sport names the Strava import already
-created (cycling, running, hike, walk, alpine_ski, nordic_ski, swim, kayak,
+created (running, hike, walk, alpine_ski, nordic_ski, swim, kayak,
 snowshoe, rowing, rollerblading, workout, water_sports) so historical and
 live data line up under the same sport rows where the concepts genuinely
 match.
+
+Cycling sub-types are the deliberate exception: sport_mapping.py collapses
+all of them into one generic "cycling" bucket because the Strava bulk CSV
+export has no sub-type field to disambiguate — that data genuinely isn't
+there. Garmin's API is not under that limitation (road_biking/
+mountain_biking/gravel_cycling/etc. are real, distinct typeKeys it sends),
+so collapsing them here too would be throwing away signal that actually
+exists, purely to match a historical-data limitation on the *other*
+importer. They're kept as their own sport rows instead. The trade-off:
+segment matching filters on exact sport_id (app/segments/matching.py), so
+this also splits segment matching per cycling sub-type going forward — a
+segment from a future MTB ride won't match a future gravel ride on the
+same physical trail, and neither matches any historical Strava-imported
+"cycling" activity. Existing Strava-imported cycling data is unaffected
+and unmergeable with these — it stays under the generic "cycling" row
+permanently, since the CSV it came from never recorded which sub-type it
+was.
 
 Same safety net as sport_mapping.py: an unmapped typeKey falls back to a
 slugified version of itself with category="other" rather than blocking a
@@ -23,13 +40,13 @@ GARMIN_TYPE_TO_SPORT: dict[str, tuple[str, str]] = {
     "treadmill_running": ("running", "endurance"),
     "street_running": ("running", "endurance"),
     "cycling": ("cycling", "endurance"),
-    "road_biking": ("cycling", "endurance"),
-    "mountain_biking": ("cycling", "endurance"),
-    "gravel_cycling": ("cycling", "endurance"),
-    "track_cycling": ("cycling", "endurance"),
-    "indoor_cycling": ("cycling", "endurance"),
-    "virtual_ride": ("cycling", "endurance"),
-    "cyclocross": ("cycling", "endurance"),
+    "road_biking": ("road_biking", "endurance"),
+    "mountain_biking": ("mountain_biking", "endurance"),
+    "gravel_cycling": ("gravel_cycling", "endurance"),
+    "track_cycling": ("track_cycling", "endurance"),
+    "indoor_cycling": ("indoor_cycling", "endurance"),
+    "virtual_ride": ("virtual_ride", "endurance"),
+    "cyclocross": ("cyclocross", "endurance"),
     "hiking": ("hike", "endurance"),
     "walking": ("walk", "endurance"),
     "casual_walking": ("walk", "endurance"),

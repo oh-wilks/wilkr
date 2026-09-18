@@ -174,6 +174,30 @@ and was unused — this phase was UI + queries only, no new modeling decisions.
    them (hiding would make an already-correct historical assignment look
    unset the moment the gear was retired).
 
+**Follow-up fix, found via step 4**: the default-sport checkboxes exposed a
+pre-existing limitation — every cycling sub-type (road/MTB/gravel/indoor/
+virtual/etc.) collapsed into one generic `"cycling"` `Sport` row, so there
+was no way to tag a bike as an MTB-specific default. Root cause:
+`sport_mapping.py` (Strava's bulk CSV importer) deliberately collapses
+cycling because the CSV export has no sub-type field to disambiguate —
+that's a real, permanent data limitation for historical Strava-imported
+activities. `garmin_sport_mapping.py` (the Garmin-sync importer) doesn't
+have that limitation — Garmin's API sends real, distinct typeKeys
+(`road_biking`, `mountain_biking`, `gravel_cycling`, ...) — but was
+collapsing them to match Strava's bucket anyway, purely for continuity.
+Split going forward: Garmin-synced activities now get their real
+sub-type as its own `Sport` row; historical Strava-imported cycling stays
+under the generic `"cycling"` row permanently (can't be retroactively
+split, the source data doesn't have it). Also fixed `Sport.name`'s stale
+model comment (mentioned `road_cycling`/`mtb`, which nothing ever actually
+produced) via migration `0007`.
+**Real consequence, not just cosmetic**: segment matching filters on exact
+`sport_id` (`app/segments/matching.py`), so this also splits segment
+matching per cycling sub-type going forward — a segment from a future MTB
+ride won't match a future gravel ride on the same physical trail, nor any
+historical Strava-imported "cycling" activity. Flagged and confirmed
+before implementing, not a silent side effect.
+
 ### Phase B — Segment starring + "My Goal"
 
 Both are small, additive changes to the already-built segments feature —

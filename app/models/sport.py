@@ -12,7 +12,15 @@ class Sport(Base):
         String,
         unique=True,
         nullable=False,
-        comment="running, road_cycling, mtb, alpine_ski, nordic_ski, hike, swim",
+        comment=(
+            "Not a fixed enum — populated dynamically by importers from "
+            "source activity-type strings (see sport_mapping.py, "
+            "garmin_sport_mapping.py). Cycling sub-types diverge by source: "
+            "Strava's bulk CSV export has no sub-type field, so all cycling "
+            "collapses into one generic 'cycling' row; Garmin sync splits "
+            "them (road_biking, mountain_biking, gravel_cycling, ...) since "
+            "Garmin's API actually distinguishes them."
+        ),
     )
     category: Mapped[str] = mapped_column(
         String, nullable=False, comment="endurance, strength, other"
