@@ -30,6 +30,13 @@
       {% else %}
         never run
       {% endif %}
+      {% if garmin_sync.sync_requested_at %}
+      &nbsp;· sync requested, running shortly
+      {% else %}
+      &nbsp;<form method="post" action="/activities/sync" style="display:inline;" onsubmit="this.querySelector('button').disabled = true; this.querySelector('button').textContent = 'Requesting…';">
+        <button type="submit" class="sync-health-action">Sync now</button>
+      </form>
+      {% endif %}
     </div>
     {% endif %}
     {% block content %}{% endblock %}

@@ -29,6 +29,18 @@ class GarminSyncState(Base):
     updated_at: Mapped[datetime.datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now(), onupdate=func.now()
     )
+    sync_requested_at: Mapped[datetime.datetime | None] = mapped_column(
+        DateTime,
+        comment=(
+            "nullable — set by the web UI's 'Sync now' button, cleared by "
+            "the garmin-sync loop once it picks the request up and runs. "
+            "The loop polls this on a short interval (see POLL_INTERVAL_S "
+            "in app/importers/garmin.py) separately from its normal "
+            "GARMIN_SYNC_INTERVAL_S cadence, since garmin-sync runs as its "
+            "own container/process — this DB column is the coordination "
+            "mechanism between the two, not a message queue."
+        ),
+    )
 
     __table_args__ = (
         CheckConstraint(

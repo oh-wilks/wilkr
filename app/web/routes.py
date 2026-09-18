@@ -105,6 +105,23 @@ async def activity_list(request: Request, db: AsyncSession = Depends(get_db)):
     )
 
 
+@router.post("/activities/sync")
+async def activity_sync_now(request: Request, db: AsyncSession = Depends(get_db)):
+    # Idempotent by construction — if a request is already pending
+    # (sync_requested_at IS NOT NULL, not yet picked up by the garmin-sync
+    # loop), setting it again to "now" doesn't create a second sync, the
+    # loop just runs once and clears it. No separate "already pending"
+    # guard needed server-side; the template hides/disables the button
+    # instead, for the common case of a user not spam-clicking on purpose.
+    exists = (await db.execute(text("SELECT 1 FROM garmin_sync_state"))).first() is not None
+    if exists:
+        await db.execute(text("UPDATE garmin_sync_state SET sync_requested_at = NOW()"))
+    else:
+        await db.execute(text("INSERT INTO garmin_sync_state (sync_requested_at) VALUES (NOW())"))
+    await db.commit()
+    return RedirectResponse(url="/activities", status_code=303)
+
+
 @router.get("/activities/rows")
 async def activity_rows(
     request: Request, offset: int, db: AsyncSession = Depends(get_db)

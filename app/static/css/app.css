@@ -73,6 +73,18 @@ button.theme-toggle:hover { color: var(--text-primary); }
 .sync-health-warning a {
   text-decoration: underline;
 }
+.sync-health-action {
+  background: none;
+  border: none;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+}
+.sync-health-action:hover {
+  color: var(--accent);
+}
 
 .action-menu {
   display: inline-block;

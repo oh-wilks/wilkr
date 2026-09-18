@@ -36,7 +36,7 @@ import tempfile
 import zipfile
 
 from garminconnect import Garmin
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.session import async_session
@@ -384,13 +384,42 @@ async def run_once(interactive: bool = False) -> None:
         print(f"Segment matches: {segment_matches}")
 
 
+POLL_INTERVAL_S = 15  # how often the loop checks for a manual "Sync now"
+# request — independent of GARMIN_SYNC_INTERVAL_S, the normal scheduled
+# cadence. garmin-sync runs as its own container, separate from the web
+# app, so a button click can't call into this process directly; polling a
+# DB column (garmin_sync_state.sync_requested_at) is the coordination
+# mechanism between the two, not a message queue this project doesn't
+# otherwise need.
+
+
 async def run_loop(interval_s: int) -> None:
+    elapsed_since_run_s = interval_s  # run immediately on startup, same as before
     while True:
-        try:
-            await run_once(interactive=False)
-        except Exception as exc:  # noqa: BLE001 — the loop itself must never die
-            print(f"Garmin sync loop iteration crashed: {_scrub_secrets(str(exc))}")
-        await asyncio.sleep(interval_s)
+        async with async_session() as session:
+            requested_at = await session.scalar(
+                text("SELECT sync_requested_at FROM garmin_sync_state LIMIT 1")
+            )
+
+        if elapsed_since_run_s >= interval_s or requested_at is not None:
+            try:
+                await run_once(interactive=False)
+            except Exception as exc:  # noqa: BLE001 — the loop itself must never die
+                print(f"Garmin sync loop iteration crashed: {_scrub_secrets(str(exc))}")
+            async with async_session() as session:
+                # Single-row table (see the model's own docstring) — no
+                # WHERE clause needed, and this also clears a request that
+                # arrived while a scheduled run was already in progress,
+                # since that run just satisfied it too.
+                await session.execute(
+                    text("UPDATE garmin_sync_state SET sync_requested_at = NULL")
+                )
+                await session.commit()
+            elapsed_since_run_s = 0
+        else:
+            elapsed_since_run_s += POLL_INTERVAL_S
+
+        await asyncio.sleep(POLL_INTERVAL_S)
 
 
 def main() -> None:
