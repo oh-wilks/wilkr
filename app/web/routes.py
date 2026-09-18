@@ -36,6 +36,7 @@ from app.web.formatting import (
     format_rank,
     format_speed,
     format_time_ago,
+    speed_stream_for_display,
 )
 
 router = APIRouter()
@@ -156,6 +157,11 @@ async def activity_detail(
         .all()
     )
     streams = {s.type: decimate(s.data) for s in stream_rows}
+    speed_mode = "kmh"
+    if "speed" in streams:
+        streams["speed"], speed_mode = speed_stream_for_display(
+            streams["speed"], activity.sport.name
+        )
 
     laps = list(
         (
@@ -220,6 +226,7 @@ async def activity_detail(
             "laps": laps,
             "segment_efforts": segment_efforts,
             "gear_options": gear_options,
+            "speed_mode": speed_mode,
         },
     )
 
@@ -774,10 +781,11 @@ async def segment_effort_detail(
             text(
                 """
                 SELECT se.id, se.segment_id, se.activity_id, se.elapsed_time_s, se.achieved_at,
-                       a.name AS activity_name, s.name AS segment_name
+                       a.name AS activity_name, s.name AS segment_name, sp.name AS sport_name
                 FROM segment_efforts se
                 JOIN activities a ON a.id = se.activity_id
                 JOIN segments s ON s.id = se.segment_id
+                JOIN sports sp ON sp.id = s.sport_id
                 WHERE se.id = :effort_id AND se.segment_id = :segment_id
                 """
             ),
@@ -828,6 +836,10 @@ async def segment_effort_detail(
         if sliced:
             streams[stream.type] = decimate(sliced)
 
+    speed_mode = "kmh"
+    if "speed" in streams:
+        streams["speed"], speed_mode = speed_stream_for_display(streams["speed"], row.sport_name)
+
     return templates.TemplateResponse(
         request,
         "segments/effort_detail.html",
@@ -836,6 +848,7 @@ async def segment_effort_detail(
             "rank": rank_row.rank if rank_row else None,
             "total_efforts": rank_row.total if rank_row else None,
             "streams": streams,
+            "speed_mode": speed_mode,
         },
     )
 

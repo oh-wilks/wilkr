@@ -73,7 +73,7 @@
 {% if laps %}
 <table class="laps">
   <thead>
-    <tr><th>Lap</th><th>Time</th><th>Distance</th><th>Avg speed</th><th>Max speed</th><th>Elevation Δ</th></tr>
+    <tr><th>Lap</th><th>Time</th><th>Distance</th><th>{{ "Avg pace" if speed_mode == "pace" else "Avg speed" }}</th><th>{{ "Best pace" if speed_mode == "pace" else "Max speed" }}</th><th>Elevation Δ</th></tr>
   </thead>
   <tbody>
     {% for lap in laps %}
@@ -81,8 +81,8 @@
       <td>{{ lap.lap_index }}</td>
       <td>{{ lap.elapsed_time_s | duration }}</td>
       <td>{{ lap.distance_m | distance }}</td>
-      <td>{{ lap.avg_speed_mps | speed }}</td>
-      <td>{{ lap.max_speed_mps | speed }}</td>
+      <td>{{ lap.avg_speed_mps | speed(activity.sport.name) }}</td>
+      <td>{{ lap.max_speed_mps | speed(activity.sport.name) }}</td>
       <td>{{ lap.elevation_change_m | elevation }}</td>
     </tr>
     {% endfor %}
@@ -255,18 +255,31 @@
     {% endif %}
 
     var streams = {{ streams | tojson }};
+    var speedMode = {{ speed_mode | tojson }};
     var labelNames = {
       heart_rate: 'Heart Rate (bpm)',
       elevation: 'Elevation (m)',
-      speed: 'Speed (m/s)',
+      speed: speedMode === 'pace' ? 'Pace (min/km)' : 'Speed (km/h)',
       cadence: 'Cadence (rpm)',
       power: 'Power (W)',
     };
+
+    function formatPaceTick(secondsPerKm) {
+      secondsPerKm = Math.round(secondsPerKm);
+      var minutes = Math.floor(secondsPerKm / 60);
+      var secs = secondsPerKm % 60;
+      return minutes + ':' + String(secs).padStart(2, '0');
+    }
+
     Object.keys(streams).forEach(function (type) {
       var points = streams[type];
       if (!points || !points.length) return;
       var canvas = document.getElementById('chart-' + type);
       if (!canvas) return;
+      // Pace is speed inverted (lower = faster) — reversing the axis keeps
+      // "up the chart = faster" true for both speed- and pace-based sports,
+      // instead of pace reading backwards from every other stream.
+      var isPace = type === 'speed' && speedMode === 'pace';
       var chart = new Chart(canvas, {
         type: 'line',
         plugins: [playheadPlugin],
@@ -286,9 +299,16 @@
           animation: false,
           scales: {
             x: { display: false },
-            y: { ticks: { color: secondary }, grid: { color: 'rgba(128,131,158,0.15)' } },
+            y: {
+              reverse: isPace,
+              ticks: { color: secondary, callback: isPace ? formatPaceTick : undefined },
+              grid: { color: 'rgba(128,131,158,0.15)' },
+            },
           },
-          plugins: { legend: { display: false } },
+          plugins: {
+            legend: { display: false },
+            tooltip: isPace ? { callbacks: { label: function (ctx) { return formatPaceTick(ctx.parsed.y) + ' /km'; } } } : {},
+          },
         },
       });
 

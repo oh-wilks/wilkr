@@ -45,18 +45,28 @@
     // data shape ({t, v} pairs, decimated) is identical, just a slice of
     // it (this effort's time window) rather than the whole activity.
     var streams = {{ streams | tojson }};
+    var speedMode = {{ speed_mode | tojson }};
     var labelNames = {
       heart_rate: 'Heart Rate (bpm)',
       elevation: 'Elevation (m)',
-      speed: 'Speed (m/s)',
+      speed: speedMode === 'pace' ? 'Pace (min/km)' : 'Speed (km/h)',
       cadence: 'Cadence (rpm)',
       power: 'Power (W)',
     };
+
+    function formatPaceTick(secondsPerKm) {
+      secondsPerKm = Math.round(secondsPerKm);
+      var minutes = Math.floor(secondsPerKm / 60);
+      var secs = secondsPerKm % 60;
+      return minutes + ':' + String(secs).padStart(2, '0');
+    }
+
     Object.keys(streams).forEach(function (type) {
       var points = streams[type];
       if (!points || !points.length) return;
       var canvas = document.getElementById('chart-' + type);
       if (!canvas) return;
+      var isPace = type === 'speed' && speedMode === 'pace';
       new Chart(canvas, {
         type: 'line',
         data: {
@@ -75,9 +85,16 @@
           animation: false,
           scales: {
             x: { display: false },
-            y: { ticks: { color: secondary }, grid: { color: 'rgba(128,131,158,0.15)' } },
+            y: {
+              reverse: isPace,
+              ticks: { color: secondary, callback: isPace ? formatPaceTick : undefined },
+              grid: { color: 'rgba(128,131,158,0.15)' },
+            },
           },
-          plugins: { legend: { display: false } },
+          plugins: {
+            legend: { display: false },
+            tooltip: isPace ? { callbacks: { label: function (ctx) { return formatPaceTick(ctx.parsed.y) + ' /km'; } } } : {},
+          },
         },
       });
     });
