@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 import pathlib
 
 from fastapi import APIRouter, Depends, Form, Request
@@ -22,6 +23,7 @@ from app.models import (
 )
 from app.segments.geometry import compute_segment_geometry, find_nearest_track_index
 from app.segments.matching import find_similar_segments, match_segment_against_activities
+from app.segments.stats import get_segment_elevation_profile, get_segment_length
 from app.web.formatting import (
     decimate,
     format_date,
@@ -29,6 +31,7 @@ from app.web.formatting import (
     format_distance,
     format_duration,
     format_elevation,
+    format_grade,
     format_rank,
     format_speed,
     format_time_ago,
@@ -46,6 +49,7 @@ templates.env.filters["date_short"] = format_date_short
 templates.env.filters["speed"] = format_speed
 templates.env.filters["time_ago"] = format_time_ago
 templates.env.filters["rank_label"] = format_rank
+templates.env.filters["grade"] = format_grade
 
 
 def static_url(path: str) -> str:
@@ -616,8 +620,36 @@ async def segment_detail(
         )
     ).all()
 
+    # Calendar-year "best this year" alongside the all-time PR already in
+    # `efforts` — the wilkr-shaped equivalent of Strava's compare-to-self
+    # views (see docs/segments_roadmap.md's Phase C note on why a
+    # multi-user leaderboard isn't the right analog here).
+    year_start = datetime.datetime(datetime.datetime.now().year, 1, 1)
+    best_this_year_s = await db.scalar(
+        text(
+            """
+            SELECT MIN(se.elapsed_time_s)
+            FROM segment_efforts se
+            JOIN activities a ON a.id = se.activity_id
+            WHERE se.segment_id = :segment_id AND a.user_id = :user_id
+              AND se.achieved_at >= :year_start
+            """
+        ),
+        {"segment_id": segment_id, "user_id": user_id, "year_start": year_start},
+    )
+
+    elevation = await get_segment_elevation_profile(db, segment_id)
+    distance_m = elevation["distance_m"] if elevation else await get_segment_length(db, segment_id)
+
     return templates.TemplateResponse(
         request,
         "segments/detail.html",
-        {"segment": segment, "geojson": geojson, "efforts": efforts},
+        {
+            "segment": segment,
+            "geojson": geojson,
+            "efforts": efforts,
+            "best_this_year_s": best_this_year_s,
+            "elevation": elevation,
+            "distance_m": distance_m,
+        },
     )

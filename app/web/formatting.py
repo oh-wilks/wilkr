@@ -39,6 +39,12 @@ def format_speed(mps: float | None) -> str:
     return f"{mps:.1f} m/s"
 
 
+def format_grade(pct: float | None) -> str:
+    if pct is None:
+        return "—"
+    return f"{pct:+.1f}%"
+
+
 def format_date(value: datetime.datetime | None) -> str:
     if value is None:
         return "—"

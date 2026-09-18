@@ -143,33 +143,32 @@ rather than after.
   will adopt the same way, not page-specific state. No new dependency.
 - **Delete**: ✅ done as part of Phase A.4 above.
 
-## Phase C — richer segment detail view
+## Phase C — richer segment detail view ✅ Done (2026-09-18)
 
-Once Phase A.1–A.3 land:
-
-- Stat cards above the map (matching the existing `.stat-grid`/`.stat-tile`
-  pattern already used on activity detail): distance, elevation gain, average
-  grade, min/max elevation.
-  - **Average grade** definition to settle: net `(end_elevation -
-    start_elevation) / distance` (simple, matches most "climb segment" use
-    cases) vs. accumulated-gain-based (sum of positive deltas / distance,
-    more meaningful for undulating segments). Recommend net grade as the
-    primary stat, since it's what "is this segment a climb or a descent"
-    actually means — could add accumulated gain as a secondary stat if
-    undulating segments turn out to need it.
-- Segment's own elevation profile on its detail page (currently only exists
-  on the *creation* page) — same Chart.js pattern, now with real data derived
-  on the fly (Phase A.2).
-- "My efforts" scatter — already built; no changes needed here, just noting
-  it satisfies this ask already.
-- **Compare-to-self over time windows.** The effort table currently only
-  highlights one global all-time PR. Add windowed bests alongside it — e.g.
-  "Best this year" / "Best all-time" as separate stat cards or table
-  callouts, computed the same way as the existing `RANK() OVER (...)` query
-  but with an added `achieved_at >= :window_start` filter for the windowed
-  version. This is the wilkr-shaped equivalent of Strava's "compare to
-  yourself" views — no multi-user leaderboard needed for it, just a second
-  ranking scoped by date instead of scoped by nothing.
+- **Stat cards**: `app/segments/stats.py`'s `get_segment_elevation_profile`
+  now returns both aggregate stats *and* the per-point profile (one query
+  serves the stat cards and the chart below, rather than two passes over
+  the same geometry). Distance shows for every segment (a plain, always-
+  available `ST_Length` via the new `get_segment_length` fallback);
+  elevation gain / average grade / lowest / highest only show when the
+  segment has a `source_activity_id` to derive them from — verified both
+  paths directly (segment 16, which has one: full 5-tile stat row with
+  plausible numbers; segment 2, a legacy segment: distance-only, no crash,
+  no empty elevation tiles). **Average grade** went with net
+  `(end_elevation − start_elevation) / distance`, per the plan's
+  recommendation — new `format_grade` filter, signed (`+2.4%`/`−1.7%`) so
+  climbs and descents read at a glance.
+- **Elevation profile chart**: same Chart.js single-filled-line pattern as
+  the creation flow's profile, minus the slider/zoom interactivity this
+  page doesn't need — read-only, whole-segment shape.
+- **Compare-to-self**: added "All-time PR" and "Best this year" (calendar
+  year) as two more stat-grid tiles, computed as plain `MIN(elapsed_time_s)`
+  scalars rather than folding a second ranking into the existing
+  `RANK() OVER (...)` query — simpler, and the two are genuinely different
+  questions ("what's the single best" vs. "what's the best within a
+  window"), not different views of the same ranked list.
+- "My efforts" scatter — already satisfied this ask as noted in the
+  original plan; no changes needed.
 
 ## Phase D — effort-level analysis
 
