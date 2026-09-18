@@ -3,10 +3,13 @@
 {% block content %}
 <div class="detail-header">
   <h1>Gear</h1>
+  <div class="meta">
+    <a href="/gear/new" class="theme-toggle">+ Add gear</a>
+  </div>
 </div>
 
 {% if not gear_by_type %}
-<div class="empty-state">No gear yet — add a bike or pair of shoes below.</div>
+<div class="empty-state">No gear yet — add a bike or pair of shoes above.</div>
 {% endif %}
 
 {% for type_value, type_label in gear_types %}
@@ -22,27 +25,15 @@
       <th>Brand / model</th>
       <th>Distance</th>
       <th>Purchased</th>
-      <th></th>
     </tr>
   </thead>
   <tbody>
     {% for item in active %}
-    <tr>
-      <td style="text-align:left;">{{ item.name }}</td>
+    <tr data-equipment-id="{{ item.id }}">
+      <td style="text-align:left;"><a href="/gear/{{ item.id }}">{{ item.name }}</a></td>
       <td>{{ [item.brand, item.model] | select | join(' ') }}</td>
       <td>{{ item.distance_m | distance }}</td>
       <td>{{ item.purchased_at | date_short }}</td>
-      <td>
-        <details class="action-menu">
-          <summary class="theme-toggle">&hellip;</summary>
-          <div class="action-menu-items">
-            <a href="/gear/{{ item.id }}/edit">Edit</a>
-            <form method="post" action="/gear/{{ item.id }}/retire">
-              <button type="submit">Retire</button>
-            </form>
-          </div>
-        </details>
-      </td>
     </tr>
     {% endfor %}
   </tbody>
@@ -53,22 +44,11 @@
   <table class="laps" style="margin-top:8px;">
     <tbody>
       {% for item in retired %}
-      <tr>
-        <td style="text-align:left; color:var(--text-secondary);">{{ item.name }}</td>
+      <tr data-equipment-id="{{ item.id }}">
+        <td style="text-align:left; color:var(--text-secondary);"><a href="/gear/{{ item.id }}">{{ item.name }}</a></td>
         <td style="color:var(--text-secondary);">{{ [item.brand, item.model] | select | join(' ') }}</td>
         <td style="color:var(--text-secondary);">{{ item.distance_m | distance }}</td>
         <td style="color:var(--text-secondary);">retired {{ item.retired_at | date_short }}</td>
-        <td>
-          <details class="action-menu">
-            <summary class="theme-toggle">&hellip;</summary>
-            <div class="action-menu-items">
-              <a href="/gear/{{ item.id }}/edit">Edit</a>
-              <form method="post" action="/gear/{{ item.id }}/retire">
-                <button type="submit">Reactivate</button>
-              </form>
-            </div>
-          </details>
-        </td>
       </tr>
       {% endfor %}
     </tbody>
@@ -77,9 +57,4 @@
 {% endif %}
 {% endif %}
 {% endfor %}
-
-<div class="chart-card" style="margin-top:24px;">
-  <div class="chart-label">Add gear</div>
-  {% include "gear/_form.html" %}
-</div>
 {% endblock %}

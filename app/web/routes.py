@@ -892,17 +892,20 @@ async def gear_list(request: Request, db: AsyncSession = Depends(get_db)):
     gear_by_type: dict[str, list] = {}
     for row in rows:
         gear_by_type.setdefault(row.type, []).append(row)
-    sports = list((await db.execute(select(Sport).order_by(Sport.name))).scalars().all())
     return templates.TemplateResponse(
         request,
         "gear/list.html",
-        {
-            "gear_types": _GEAR_TYPES,
-            "gear_by_type": gear_by_type,
-            "equipment": None,
-            "sports": sports,
-            "selected_sport_ids": set(),
-        },
+        {"gear_types": _GEAR_TYPES, "gear_by_type": gear_by_type},
+    )
+
+
+@router.get("/gear/new")
+async def gear_new_form(request: Request, db: AsyncSession = Depends(get_db)):
+    sports = list((await db.execute(select(Sport).order_by(Sport.name))).scalars().all())
+    return templates.TemplateResponse(
+        request,
+        "gear/new.html",
+        {"equipment": None, "sports": sports, "selected_sport_ids": set()},
     )
 
 
@@ -937,7 +940,40 @@ async def gear_create(
     )
     await _set_equipment_sports(db, equipment_id, sport_ids)
     await db.commit()
-    return RedirectResponse(url="/gear", status_code=303)
+    return RedirectResponse(url=f"/gear/{equipment_id}", status_code=303)
+
+
+@router.get("/gear/{equipment_id}")
+async def gear_detail(request: Request, equipment_id: int, db: AsyncSession = Depends(get_db)):
+    equipment = await db.scalar(select(Equipment).where(Equipment.id == equipment_id))
+    if equipment is None:
+        return templates.TemplateResponse(request, "gear/not_found.html", {}, status_code=404)
+    distance_m = await db.scalar(
+        text("SELECT COALESCE(SUM(distance_m), 0) FROM activities WHERE equipment_id = :equipment_id"),
+        {"equipment_id": equipment_id},
+    )
+    sport_names = list(
+        (
+            await db.execute(
+                text(
+                    """
+                    SELECT sp.name FROM equipment_sports es
+                    JOIN sports sp ON sp.id = es.sport_id
+                    WHERE es.equipment_id = :equipment_id
+                    ORDER BY sp.name
+                    """
+                ),
+                {"equipment_id": equipment_id},
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return templates.TemplateResponse(
+        request,
+        "gear/detail.html",
+        {"equipment": equipment, "distance_m": distance_m, "sport_names": sport_names},
+    )
 
 
 @router.get("/gear/{equipment_id}/edit")
@@ -997,7 +1033,7 @@ async def gear_update(
     )
     await _set_equipment_sports(db, equipment_id, sport_ids)
     await db.commit()
-    return RedirectResponse(url="/gear", status_code=303)
+    return RedirectResponse(url=f"/gear/{equipment_id}", status_code=303)
 
 
 @router.post("/gear/{equipment_id}/retire")
@@ -1018,4 +1054,4 @@ async def gear_retire(
         {"equipment_id": equipment_id},
     )
     await db.commit()
-    return RedirectResponse(url="/gear", status_code=303)
+    return RedirectResponse(url=f"/gear/{equipment_id}", status_code=303)

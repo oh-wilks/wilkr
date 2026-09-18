@@ -198,6 +198,29 @@ ride won't match a future gravel ride on the same physical trail, nor any
 historical Strava-imported "cycling" activity. Flagged and confirmed
 before implementing, not a silent side effect.
 
+**Second refinement pass, after using the built feature**:
+- The add-gear form moved out of `/gear` (it was sitting inline at the
+  bottom of the list, permanently taking up space) into its own page,
+  `GET /gear/new` — reuses the same `gear/_form.html` partial edit already
+  used, just a third route (`new`/`create`/`edit`/`update`) pointing at it
+  instead of a second copy.
+- New `GET /gear/{id}` detail page. The per-row "…" action menu on the list
+  is gone — clicking a gear item's *name* (not the whole row) now
+  navigates there, with a row-level hover background as the "this is
+  clickable" cue (`table.laps tbody tr[data-equipment-id]:hover` in
+  `app.css` — background only, no `cursor: pointer`, since unlike the
+  segment-effort rows the whole row isn't actually clickable, only the
+  name link is). Edit/Retire moved onto the detail page's own action menu,
+  same `<details class="action-menu">` pattern as segment detail.
+  `gear_create`/`gear_update`/`gear_retire` now redirect to the detail
+  page instead of the list, matching how segment create/rename/rescan
+  already redirect to segment detail rather than back to `/segments`.
+- **Explicitly declined, staying out of scope**: a components table
+  (chain/tires wear on bikes, bindings/boots on skis, etc.) — considered
+  and turned down, since it isn't a Strava feature that's actually been
+  used. Not building it; noted here so it isn't proposed again without new
+  information changing that.
+
 ### Phase B — Segment starring + "My Goal"
 
 Both are small, additive changes to the already-built segments feature —

@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}{{ equipment.name }} — wilkr{% endblock %}
+{% block content %}
+<div class="detail-header">
+  <h1>{{ equipment.name }}</h1>
+  <div class="meta">
+    <span class="sport-tag">{{ equipment.type }}</span>
+    {% if equipment.retired_at %}&nbsp;·&nbsp;retired {{ equipment.retired_at | date_short }}{% endif %}
+    <details class="action-menu">
+      <summary class="theme-toggle">&hellip;</summary>
+      <div class="action-menu-items">
+        <a href="/gear/{{ equipment.id }}/edit">Edit</a>
+        <form method="post" action="/gear/{{ equipment.id }}/retire">
+          <button type="submit">{{ "Reactivate" if equipment.retired_at else "Retire" }}</button>
+        </form>
+      </div>
+    </details>
+  </div>
+</div>
+
+<div class="stat-grid">
+  <div class="stat-tile"><div class="value">{{ distance_m | distance }}</div><div class="label">Distance</div></div>
+  <div class="stat-tile"><div class="value">{{ [equipment.brand, equipment.model] | select | join(' ') or "—" }}</div><div class="label">Brand / model</div></div>
+  <div class="stat-tile"><div class="value">{{ equipment.purchased_at | date_short }}</div><div class="label">Purchased</div></div>
+</div>
+
+{% if sport_names %}
+<p style="color:var(--text-secondary); font-size:13px;">Default for: {{ sport_names | join(', ') }}</p>
+{% endif %}
+{% endblock %}

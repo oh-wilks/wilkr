@@ -376,6 +376,13 @@ table.laps tbody tr[data-segment-id]:hover {
   cursor: pointer;
 }
 
+/* Only the name link inside the row navigates (not the whole row, unlike
+   the segment-effort rows above), so this is a background cue only —
+   no cursor:pointer here, the <a> already gets one natively. */
+table.laps tbody tr[data-equipment-id]:hover {
+  background: var(--surface);
+}
+
 .empty-state {
   color: var(--text-secondary);
   padding: 24px;
