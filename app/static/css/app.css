@@ -191,6 +191,26 @@ button.theme-toggle:hover { color: var(--text-primary); }
   .activity-row .stat { width: auto; }
 }
 
+.filter-bar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+.filter-bar input[type="text"] {
+  flex: 1 1 200px;
+}
+.filter-bar input[type="text"],
+.filter-bar select {
+  background: var(--bg);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 6px 10px;
+  font-family: inherit;
+  font-size: 13px;
+}
+
 #load-more {
   display: block;
   width: 100%;

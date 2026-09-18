@@ -1,7 +1,7 @@
 {% if has_more %}
 <button
   id="load-more"
-  hx-get="/segments/rows?offset={{ next_offset }}"
+  hx-get="/segments/rows?offset={{ next_offset }}&q={{ q | urlencode }}&sport_id={{ sport_id or '' }}&sort={{ sort }}"
   hx-target="#load-more"
   hx-swap="outerHTML"
 >Load more</button>

@@ -189,6 +189,8 @@
           scales: {
             x: {
               type: 'linear',
+              min: 0,
+              max: elevPoints[elevPoints.length - 1].dist_m,
               ticks: { color: secondary, callback: function (v) { return (v / 1000).toFixed(1) + 'km'; } },
             },
             y: { ticks: { color: secondary }, grid: { color: 'rgba(128,131,158,0.15)' } },

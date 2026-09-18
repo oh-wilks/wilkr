@@ -203,38 +203,104 @@ async def _get_the_user_id(db: AsyncSession) -> int | None:
     return await db.scalar(select(User.id).limit(1))
 
 
+_SEGMENT_SORTS = {
+    "recent": "s.created_at DESC",
+    "distance": "ST_Length(s.geom::geography) DESC",
+    "name": "s.name ASC",
+}
+
+
 async def _fetch_segments_page(
-    db: AsyncSession, offset: int
-) -> tuple[list[Segment], bool]:
-    result = await db.execute(
-        select(Segment)
-        .options(joinedload(Segment.sport))
-        .order_by(Segment.created_at.desc())
-        .offset(offset)
-        .limit(PAGE_SIZE + 1)
-    )
-    rows = list(result.scalars().all())
+    db: AsyncSession,
+    offset: int,
+    q: str | None = None,
+    sport_id: int | None = None,
+    sort: str = "recent",
+) -> tuple[list, bool]:
+    order_clause = _SEGMENT_SORTS.get(sort, _SEGMENT_SORTS["recent"])
+    rows = (
+        await db.execute(
+            text(
+                f"""
+                SELECT s.id, s.name, s.created_at, sp.name AS sport_name,
+                       ST_Length(s.geom::geography) AS distance_m
+                FROM segments s
+                JOIN sports sp ON sp.id = s.sport_id
+                WHERE (CAST(:q AS text) IS NULL OR s.name ILIKE '%' || :q || '%')
+                  AND (CAST(:sport_id AS integer) IS NULL OR s.sport_id = CAST(:sport_id AS integer))
+                ORDER BY {order_clause}
+                OFFSET :offset LIMIT :limit
+                """
+            ),
+            {
+                "q": q or None,
+                "sport_id": sport_id,
+                "offset": offset,
+                "limit": PAGE_SIZE + 1,
+            },
+        )
+    ).all()
     has_more = len(rows) > PAGE_SIZE
     return rows[:PAGE_SIZE], has_more
 
 
+def _segment_filter_context(q: str | None, sport_id: int | None, sort: str) -> dict:
+    return {
+        "q": q or "",
+        "sport_id": sport_id,
+        "sort": sort if sort in _SEGMENT_SORTS else "recent",
+    }
+
+
 @router.get("/segments")
-async def segment_list(request: Request, db: AsyncSession = Depends(get_db)):
-    segments, has_more = await _fetch_segments_page(db, 0)
+async def segment_list(
+    request: Request,
+    q: str | None = None,
+    sport_id: str | None = None,
+    sort: str = "recent",
+    db: AsyncSession = Depends(get_db),
+):
+    # sport_id arrives as a plain query string, not a typed FastAPI param —
+    # both the filter form's "All sports" option and the load-more link
+    # send an empty string for "no filter", which `int | None` can't parse
+    # (FastAPI 422s on "" for an int param; it only accepts a real integer
+    # or the param being absent entirely).
+    sport_id_int = int(sport_id) if sport_id else None
+    segments, has_more = await _fetch_segments_page(db, 0, q, sport_id_int, sort)
+    sports = list((await db.execute(select(Sport).order_by(Sport.name))).scalars().all())
     return templates.TemplateResponse(
         request,
         "segments/list.html",
-        {"segments": segments, "has_more": has_more, "next_offset": PAGE_SIZE},
+        {
+            "segments": segments,
+            "has_more": has_more,
+            "next_offset": PAGE_SIZE,
+            "sports": sports,
+            **_segment_filter_context(q, sport_id_int, sort),
+        },
     )
 
 
 @router.get("/segments/rows")
-async def segment_rows(request: Request, offset: int, db: AsyncSession = Depends(get_db)):
-    segments, has_more = await _fetch_segments_page(db, offset)
+async def segment_rows(
+    request: Request,
+    offset: int,
+    q: str | None = None,
+    sport_id: str | None = None,
+    sort: str = "recent",
+    db: AsyncSession = Depends(get_db),
+):
+    sport_id_int = int(sport_id) if sport_id else None
+    segments, has_more = await _fetch_segments_page(db, offset, q, sport_id_int, sort)
     return templates.TemplateResponse(
         request,
         "segments/_rows_partial.html",
-        {"segments": segments, "has_more": has_more, "next_offset": offset + PAGE_SIZE},
+        {
+            "segments": segments,
+            "has_more": has_more,
+            "next_offset": offset + PAGE_SIZE,
+            **_segment_filter_context(q, sport_id_int, sort),
+        },
     )
 
 

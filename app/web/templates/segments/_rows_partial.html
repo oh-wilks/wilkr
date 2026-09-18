@@ -1,2 +1,12 @@
+{% if not segments %}
+<div class="empty-state">
+  {% if q or sport_id %}
+  No segments match those filters.
+  {% else %}
+  No segments yet. Open an activity and use "Create segment from this activity" to make your first one.
+  {% endif %}
+</div>
+{% else %}
 {% include "segments/_rows.html" %}
+{% endif %}
 {% include "segments/_load_more.html" %}

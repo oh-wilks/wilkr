@@ -147,7 +147,20 @@
 
     if (latlngs.length) {
       var track = L.polyline(latlngs, { color: accent, weight: 3, opacity: 0.5 }).addTo(map);
+      {% if pending and pending.start_idx is defined and pending.start_idx is not none %}
+      // Editing an existing segment (or a near-duplicate warning
+      // re-rendered this page) — zoom to the current/picked range instead
+      // of the whole activity, since that's the part actually being
+      // refined; the full track is still drawn (dimmed) for context, and
+      // a bit more padding than the fresh-creation case so the zoomed-in
+      // view isn't cropped too tight to work with.
+      map.fitBounds(
+        L.polyline(latlngs.slice({{ pending.start_idx }}, {{ pending.end_idx }} + 1)).getBounds(),
+        { padding: [40, 40] }
+      );
+      {% else %}
       map.fitBounds(track.getBounds(), { padding: [16, 16] });
+      {% endif %}
     }
 
     // The chart's x/y axes zoom to a window around the current [s, e]

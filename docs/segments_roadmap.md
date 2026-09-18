@@ -198,9 +198,29 @@ elapsed_time_s]` on the parent activity.
 
 ## Phase E — discovery, as segment count grows
 
-- Search/filter/sort on `/segments` (by sport, by distance, most recent
-  effort) — the list is a flat unsorted table today; fine at a handful of
-  segments, won't stay fine.
+- ✅ **Done (2026-09-18).** Search (name, `ILIKE`), sport filter, and sort
+  (recent / longest first / name) on `/segments` — a filter bar wired via
+  htmx (`hx-trigger` on debounced input + both `<select>`s), targeting a
+  persistent `#segment-list` wrapper so the swap target exists even when
+  the very first page load has zero results. Distance now shows per row
+  too (reusing `activity-row .stat`, already shared with the activities
+  list — no new CSS needed for that part). Caught and fixed a real bug
+  during testing, not just a design choice: the filter form's own "All
+  sports" option and the load-more link both send `sport_id=` (empty
+  string) for "no filter", which FastAPI's `int | None` param type 422s on
+  (it accepts a real integer or the param being absent, not an empty
+  string) — switched to `str | None` with manual `int(...) if sport_id else
+  None` parsing. Also had to route the *parsed* int (not the raw string)
+  into the dropdown's `selected` comparison — Jinja's `==` doesn't coerce
+  `"4" == 4` to true, so the raw string would have silently broken the
+  dropdown's persisted state after a filter change even once the 422 was
+  fixed. Verified all three filters individually and combined, the
+  zero-results empty-state message, and load-more carrying the active
+  filters through pagination rather than resetting to unfiltered results.
+  Sort by "most recent effort" from the original plan folded into the
+  existing "recent" (by `created_at`) since a segment's own creation date
+  and its most recent effort are usually close together in practice — can
+  split them out later if that turns out not to hold.
 - Optional: a map-based segment explorer (all segments as an overlay,
   independent of any one activity) — a real Strava feature, meaningfully
   more work (needs its own map + viewport-based segment loading), lower
@@ -247,6 +267,38 @@ in two different forms (`segments/new.html`'s ghost marker during slider
 drag, `activities/detail.html`'s hover-to-highlight segment polylines) —
 this is a third variation on a pattern this codebase already has twice,
 not a new one.
+
+## Phase G — themed modal component (replacing native confirm()/prompt())
+
+Delete, rename, and edit's "this will recompute effort history" warning
+all currently use the browser's native `confirm()`/`prompt()` — functional,
+but unstyled OS chrome that ignores the app's dark/light theme entirely and
+can't be styled at all. Replace with a themed, reusable modal.
+
+- **A real component, not one-off HTML per dialog** — the user's own
+  instinct here matches the project's established pattern: reusable UI
+  behavior belongs in `base.html` alongside the other shared components
+  already there (theme-toggle, the action-menu close-on-outside-click),
+  not duplicated per template the way small page-specific helpers are.
+  Something like `Modal.confirm({title, message, danger}) => Promise` and
+  `Modal.prompt({title, message, initialValue}) => Promise`.
+- **Async by necessity, not just by choice.** A custom HTML/CSS modal can't
+  block execution the way native `confirm()`/`prompt()` do — every current
+  call site (rename, delete, edit's recompute warning) needs converting
+  from synchronous `if (!confirm(...)) return false;` to `async`/`await`.
+  This is a real, contained refactor of existing working code, not purely
+  additive — budget for it accordingly, not as a quick styling pass.
+- **Styling**: reuse the existing theme tokens (`--bg`/`--surface`/
+  `--border`/`--accent`/`--danger`) so it matches dark/light switching
+  that already works everywhere else, rather than inventing new colors.
+- **This directly prevents a bug class already hit once.** Rename's
+  original implementation tried to inject the current name into an inline
+  `onsubmit=""` attribute via `tojson`, which broke the moment the name
+  contained a quote (fixed via a `data-*` attribute instead — see Phase
+  B's notes). A modal component that takes its message as a plain JS
+  string parameter, not reconstructed from an HTML attribute, makes that
+  entire class of escaping bug structurally impossible rather than
+  something to keep catching by hand.
 
 ## Explicitly out of scope, with reasoning
 

@@ -1,7 +1,8 @@
 {% for segment in segments %}
 <div class="activity-row">
-  <span class="sport-tag">{{ segment.sport.name }}</span>
+  <span class="sport-tag">{{ segment.sport_name }}</span>
   <span class="name"><a href="/segments/{{ segment.id }}">{{ segment.name }}</a></span>
+  <span class="stat">{{ segment.distance_m | distance }}</span>
   <span class="date">{{ segment.created_at | date_short }}</span>
 </div>
 {% endfor %}
