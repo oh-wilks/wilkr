@@ -7,7 +7,7 @@
   hx-get="/segments/rows"
   hx-target="#segment-list"
   hx-swap="innerHTML"
-  hx-trigger="input changed delay:300ms from:#q, change from:#filter-sport, change from:#filter-sort"
+  hx-trigger="input changed delay:300ms from:#q, change from:#filter-sport, change from:#filter-sort, change from:#filter-starred"
 >
   <input type="text" id="q" name="q" placeholder="Search segments…" value="{{ q }}">
   <select id="filter-sport" name="sport_id">
@@ -21,6 +21,10 @@
     <option value="distance" {% if sort == "distance" %}selected{% endif %}>Longest first</option>
     <option value="name" {% if sort == "name" %}selected{% endif %}>Name (A-Z)</option>
   </select>
+  <label style="display:flex; align-items:center; gap:6px; font-size:13px; color:var(--text-secondary);">
+    <input type="checkbox" id="filter-starred" name="starred" {% if starred_only %}checked{% endif %}>
+    Starred only
+  </label>
 </form>
 
 <div id="segment-list">

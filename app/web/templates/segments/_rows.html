@@ -1,5 +1,7 @@
+{% from "segments/_star_button.html" import star_button %}
 {% for segment in segments %}
 <div class="activity-row">
+  {{ star_button(segment.id, segment.starred) }}
   <span class="sport-tag">{{ segment.sport_name }}</span>
   <span class="name"><a href="/segments/{{ segment.id }}">{{ segment.name }}</a></span>
   <span class="stat">{{ segment.distance_m | distance }}</span>

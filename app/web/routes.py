@@ -267,18 +267,20 @@ async def _fetch_segments_page(
     q: str | None = None,
     sport_id: int | None = None,
     sort: str = "recent",
+    starred_only: bool = False,
 ) -> tuple[list, bool]:
     order_clause = _SEGMENT_SORTS.get(sort, _SEGMENT_SORTS["recent"])
     rows = (
         await db.execute(
             text(
                 f"""
-                SELECT s.id, s.name, s.created_at, sp.name AS sport_name,
+                SELECT s.id, s.name, s.created_at, s.starred, sp.name AS sport_name,
                        ST_Length(s.geom::geography) AS distance_m
                 FROM segments s
                 JOIN sports sp ON sp.id = s.sport_id
                 WHERE (CAST(:q AS text) IS NULL OR s.name ILIKE '%' || :q || '%')
                   AND (CAST(:sport_id AS integer) IS NULL OR s.sport_id = CAST(:sport_id AS integer))
+                  AND (CAST(:starred_only AS boolean) = FALSE OR s.starred = TRUE)
                 ORDER BY {order_clause}
                 OFFSET :offset LIMIT :limit
                 """
@@ -286,6 +288,7 @@ async def _fetch_segments_page(
             {
                 "q": q or None,
                 "sport_id": sport_id,
+                "starred_only": starred_only,
                 "offset": offset,
                 "limit": PAGE_SIZE + 1,
             },
@@ -295,11 +298,14 @@ async def _fetch_segments_page(
     return rows[:PAGE_SIZE], has_more
 
 
-def _segment_filter_context(q: str | None, sport_id: int | None, sort: str) -> dict:
+def _segment_filter_context(
+    q: str | None, sport_id: int | None, sort: str, starred_only: bool
+) -> dict:
     return {
         "q": q or "",
         "sport_id": sport_id,
         "sort": sort if sort in _SEGMENT_SORTS else "recent",
+        "starred_only": starred_only,
     }
 
 
@@ -309,15 +315,20 @@ async def segment_list(
     q: str | None = None,
     sport_id: str | None = None,
     sort: str = "recent",
+    starred: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     # sport_id arrives as a plain query string, not a typed FastAPI param —
     # both the filter form's "All sports" option and the load-more link
     # send an empty string for "no filter", which `int | None` can't parse
     # (FastAPI 422s on "" for an int param; it only accepts a real integer
-    # or the param being absent entirely).
+    # or the param being absent entirely). Same reasoning applies to
+    # `starred` — an unchecked checkbox omits the field entirely rather
+    # than sending "false", so `str | None` + truthiness is what actually
+    # matches how a browser submits it.
     sport_id_int = int(sport_id) if sport_id else None
-    segments, has_more = await _fetch_segments_page(db, 0, q, sport_id_int, sort)
+    starred_only = bool(starred)
+    segments, has_more = await _fetch_segments_page(db, 0, q, sport_id_int, sort, starred_only)
     sports = list((await db.execute(select(Sport).order_by(Sport.name))).scalars().all())
     return templates.TemplateResponse(
         request,
@@ -327,7 +338,7 @@ async def segment_list(
             "has_more": has_more,
             "next_offset": PAGE_SIZE,
             "sports": sports,
-            **_segment_filter_context(q, sport_id_int, sort),
+            **_segment_filter_context(q, sport_id_int, sort, starred_only),
         },
     )
 
@@ -339,10 +350,12 @@ async def segment_rows(
     q: str | None = None,
     sport_id: str | None = None,
     sort: str = "recent",
+    starred: str | None = None,
     db: AsyncSession = Depends(get_db),
 ):
     sport_id_int = int(sport_id) if sport_id else None
-    segments, has_more = await _fetch_segments_page(db, offset, q, sport_id_int, sort)
+    starred_only = bool(starred)
+    segments, has_more = await _fetch_segments_page(db, offset, q, sport_id_int, sort, starred_only)
     return templates.TemplateResponse(
         request,
         "segments/_rows_partial.html",
@@ -350,7 +363,7 @@ async def segment_rows(
             "segments": segments,
             "has_more": has_more,
             "next_offset": offset + PAGE_SIZE,
-            **_segment_filter_context(q, sport_id_int, sort),
+            **_segment_filter_context(q, sport_id_int, sort, starred_only),
         },
     )
 
@@ -700,6 +713,61 @@ async def segment_delete(
     await db.execute(text("DELETE FROM segments WHERE id = :segment_id"), {"segment_id": segment_id})
     await db.commit()
     return RedirectResponse(url="/segments", status_code=303)
+
+
+@router.post("/segments/{segment_id}/star")
+async def segment_star(
+    request: Request, segment_id: int, db: AsyncSession = Depends(get_db)
+):
+    was_starred = await db.scalar(select(Segment.starred).where(Segment.id == segment_id))
+    if was_starred is None:
+        return templates.TemplateResponse(
+            request, "segments/not_found.html", {}, status_code=404
+        )
+    new_starred = not was_starred
+    await db.execute(
+        text("UPDATE segments SET starred = :starred WHERE id = :segment_id"),
+        {"starred": new_starred, "segment_id": segment_id},
+    )
+    await db.commit()
+    # Returns just the toggled button itself — called via hx-post/hx-swap
+    # from both /segments rows and segment detail, so toggling doesn't
+    # navigate away or lose list scroll position/filter state.
+    return templates.TemplateResponse(
+        request,
+        "segments/_star_button_render.html",
+        {"segment_id": segment_id, "starred": new_starred},
+    )
+
+
+def _parse_goal_time(value: str) -> int | None:
+    value = value.strip()
+    if not value:
+        return None
+    try:
+        parts = [int(p) for p in value.split(":")]
+    except ValueError:
+        return None
+    if len(parts) == 2:
+        return parts[0] * 60 + parts[1]
+    if len(parts) == 3:
+        return parts[0] * 3600 + parts[1] * 60 + parts[2]
+    return None
+
+
+@router.post("/segments/{segment_id}/goal")
+async def segment_goal(
+    request: Request,
+    segment_id: int,
+    goal_time: str = Form(""),
+    db: AsyncSession = Depends(get_db),
+):
+    await db.execute(
+        text("UPDATE segments SET goal_time_s = CAST(:goal_time_s AS integer) WHERE id = :segment_id"),
+        {"goal_time_s": _parse_goal_time(goal_time), "segment_id": segment_id},
+    )
+    await db.commit()
+    return RedirectResponse(url=f"/segments/{segment_id}", status_code=303)
 
 
 @router.get("/segments/{segment_id}")

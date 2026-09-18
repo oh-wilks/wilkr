@@ -383,6 +383,19 @@ table.laps tbody tr[data-equipment-id]:hover {
   background: var(--surface);
 }
 
+.star-toggle {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 2px;
+  flex: 0 0 auto;
+}
+.star-toggle:hover { color: var(--accent); }
+.star-toggle.starred { color: var(--accent); }
+
 .empty-state {
   color: var(--text-secondary);
   padding: 24px;

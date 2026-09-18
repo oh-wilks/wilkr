@@ -6,11 +6,13 @@
 {% endblock %}
 
 {% block content %}
+{% from "segments/_star_button.html" import star_button %}
 <div class="detail-header">
   <h1>{{ segment.name }}</h1>
   <div class="meta">
     <span class="sport-tag">{{ segment.sport.name }}</span>
     &nbsp;{{ efforts | length }} effort{{ "s" if efforts | length != 1 else "" }}
+    &nbsp;{{ star_button(segment.id, segment.starred) }}
     <details class="action-menu">
       <summary class="theme-toggle">&hellip;</summary>
       <div class="action-menu-items">
@@ -55,6 +57,28 @@
   <div class="stat-tile"><div class="value">{{ pr_effort.elapsed_time_s | duration }}</div><div class="label">All-time PR</div></div>
   <div class="stat-tile"><div class="value">{{ best_this_year_s | duration if best_this_year_s else "—" }}</div><div class="label">Best this year</div></div>
   {% endif %}
+</div>
+
+<div class="chart-card" style="padding:12px 16px;">
+  <form method="post" action="/segments/{{ segment.id }}/goal" style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
+    <label for="goal_time" class="label" style="margin:0;">Goal</label>
+    <input
+      type="text"
+      id="goal_time"
+      name="goal_time"
+      placeholder="mm:ss"
+      value="{{ segment.goal_time_s | duration if segment.goal_time_s else '' }}"
+      style="width:90px; background:var(--bg); color:var(--text-primary); border:1px solid var(--border); border-radius:4px; padding:4px 8px; font-family:inherit;"
+    >
+    <button type="submit" class="theme-toggle">Save</button>
+    {% if segment.goal_time_s and efforts %}
+    {% set pr_effort = efforts | selectattr('rank', 'equalto', 1) | list | first %}
+    {% set diff = pr_effort.elapsed_time_s - segment.goal_time_s %}
+    <span style="color:var(--text-secondary); font-size:13px;">
+      {% if diff <= 0 %}🎯 goal reached{% else %}{{ diff | duration }} to go{% endif %}
+    </span>
+    {% endif %}
+  </form>
 </div>
 
 {% if elevation %}

@@ -221,27 +221,42 @@ before implementing, not a silent side effect.
   used. Not building it; noted here so it isn't proposed again without new
   information changing that.
 
-### Phase B — Segment starring + "My Goal"
+### Phase B — Segment starring + "My Goal" ✅ Done (2026-09-18)
 
 Both are small, additive changes to the already-built segments feature —
 no new page, extends `/segments` and segment detail.
 
-1. Migration (next: `0007_...`): add `Segment.starred: bool` (default
-   `false`) and `Segment.goal_time_s: int | None` in the same migration —
-   both are simple nullable/defaulted columns on the same table, no reason
-   to split into two.
-2. Star toggle — a click target (probably the same star glyph as the
-   screenshot) on each `/segments` row and on segment detail, `POST
-   /segments/{id}/star` / `.../unstar` (or a single toggle endpoint).
-3. Extend the existing filter bar (`_fetch_segments_page`,
-   `app/web/routes.py`) with a "starred only" option alongside the current
-   sport/search/sort filters — same `hx-trigger`-driven pattern already
-   built for Phase E, not a new filtering mechanism.
-4. Goal-setting form on segment detail — one number input (target time,
-   parsed same as duration elsewhere), `POST /segments/{id}/goal`.
-5. Comparison line next to the existing PR/best-this-year stat tiles:
-   "Goal 5:00 · 16s to go" (or "🎯 hit" once PR ≤ goal) — pure display
-   logic over data segment detail already loads, no new query.
+1. ✅ Migration `0008`: added `Segment.starred: bool` (default `false`)
+   and `Segment.goal_time_s: int | None` in the same migration — both
+   simple nullable/defaulted columns on the same table.
+2. ✅ Star toggle — a shared Jinja **macro** (`segments/_star_button.html`,
+   `star_button(segment_id, starred)`), not a plain include, specifically
+   because the toggle needs to render identically from three different
+   context shapes: a raw-SQL row in `/segments`' list, a `Segment` ORM
+   object on detail, and just a bare `(id, starred)` pair in the
+   `POST /segments/{id}/star` toggle response itself — a macro takes
+   explicit params so all three call sites stay consistent without
+   relying on a same-named `segment` variable happening to be in scope.
+   Single toggle endpoint (flip, not separate star/unstar), same pattern
+   as gear's retire toggle. Wired via `hx-post`/`hx-target="this"`/
+   `hx-swap="outerHTML"` rather than a form-post-and-redirect — toggling a
+   star from the list shouldn't navigate away or lose scroll position/
+   active filters, and toggling from detail shouldn't force a full reload
+   either.
+3. ✅ Extended the existing filter bar with a "Starred only" checkbox,
+   same `hx-trigger`-driven pattern as Phase E's other filters. An
+   unchecked checkbox is omitted from form submission entirely (not sent
+   as `"false"`), so this needed the same `str | None` + truthiness
+   handling as `sport_id` already uses, not a plain `bool` param.
+4. ✅ Goal-setting form on segment detail — one text input (`mm:ss` or
+   `h:mm:ss`, parsed by a new `_parse_goal_time`), `POST
+   /segments/{id}/goal`. Unparsable input clears the goal rather than
+   erroring — there's nothing meaningfully sharper to validate against at
+   this scale, and the field round-trips through the same format
+   `format_duration` already displays elsewhere.
+5. ✅ Comparison line next to the goal input: "🎯 goal reached" once
+   PR ≤ goal, otherwise "`{duration}` to go" — computed from `efforts`
+   (already loaded for the PR/best-this-year tiles), no new query.
 
 ### Phase C — Dashboard / home page
 

@@ -1,0 +1,10 @@
+{% macro star_button(segment_id, starred) %}
+<button
+  type="button"
+  class="star-toggle{{ ' starred' if starred else '' }}"
+  hx-post="/segments/{{ segment_id }}/star"
+  hx-target="this"
+  hx-swap="outerHTML"
+  title="{{ 'Unstar' if starred else 'Star' }}"
+>{{ "★" if starred else "☆" }}</button>
+{% endmacro %}

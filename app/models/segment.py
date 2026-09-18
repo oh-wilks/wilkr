@@ -1,7 +1,7 @@
 import datetime
 
 from geoalchemy2 import Geometry
-from sqlalchemy import DateTime, ForeignKey, Identity, Index, Integer, String, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Identity, Index, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -33,6 +33,17 @@ class Segment(Base):
     )
     created_at: Mapped[datetime.datetime] = mapped_column(
         DateTime, nullable=False, server_default=func.now()
+    )
+    starred: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default="false",
+        comment="Personal shortlist flag, not a signal to anyone else — wilkr is single-user.",
+    )
+    goal_time_s: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+        comment="Nullable — a user-set target elapsed time, compared against PR/best-this-year on segment detail.",
     )
 
     sport: Mapped["Sport"] = relationship()
