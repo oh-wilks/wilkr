@@ -8,17 +8,46 @@ Two entry points, both built on the same core matcher:
   was just created — check it against every existing activity of the same
   sport (the charter's "scan historical activities" requirement).
 
-Algorithm (see the design brief in the Phase 2 plan for the full reasoning):
+Algorithm (see docs/segments_roadmap.md's Phase H for the full diagnosis
+this replaced — found via app/segments/diagnose*.py against real data,
+not theorized):
+
 1. Candidate filter — ST_DWithin on ::geography casts, using the existing
    GIST indexes. Cheap, coarse, just rules out tracks nowhere near the
    segment.
-2. Verification — sample points along the segment, locate each along the
-   track (ST_LineLocatePoint), confirm actual proximity at that location,
-   confirm the located fractions are monotonically increasing (direction-
-   sensitive) across at least MIN_MATCH_RATIO of samples.
-3. Elapsed time — convert the first/last passing sample's located fraction
-   to the nearest tracks.times[] index and read the timestamp directly
-   (vertex-level granularity, not sub-vertex interpolation).
+2. Pass detection — walk the TRACK's own points in chronological/
+   point-index order (ST_DumpPoints), and group consecutive
+   within-BUFFER_M points into "islands" (gaps-and-islands SQL pattern,
+   tolerant of brief GPS-dropout gaps up to MAX_GAP_POINTS). Each island
+   is one candidate pass through the segment. This is deliberately
+   track-driven, not segment-driven: sampling the *segment* and asking
+   "what's this sample's single nearest point on the whole track"
+   (the previous approach) can only ever return one location per sample,
+   so it structurally cannot represent a segment traversed more than once
+   in one activity — an out-and-back, a repeated lap, a shuttle run. Two
+   real, separate passes are separated in the track's own timeline, which
+   only a track-driven walk has access to.
+3. Per-pass verification — for each candidate island (padded by
+   PAD_POINTS so the true segment start/end has track to locate onto),
+   build an isolated sub-track from just that island's own points
+   (ST_MakeLine in Python from ST_DumpPoints output, not a length-fraction
+   ST_LineSubstring cut — GPS speed isn't constant, so a fraction-based
+   cut would misplace the boundary on climbs vs. descents) and sample the
+   segment against it: locate each sample (ST_LineLocatePoint), confirm
+   proximity, confirm the located fractions are monotonically increasing
+   (direction-sensitive) across at least MIN_MATCH_RATIO of samples. Since
+   this sub-track physically doesn't contain any other pass's points, the
+   ambiguity that motivated this whole redesign can't occur here — this
+   step is unchanged in spirit from the original algorithm, just scoped
+   to one geometrically-isolated pass instead of the whole track.
+4. Elapsed time — convert the winning chain's first/last sample's located
+   fraction to the nearest index in that pass's own (padded, sliced)
+   times[], read the timestamp directly.
+5. Record one SegmentEffort per verified pass whose time window doesn't
+   overlap an already-recorded effort for that (segment, activity) pair —
+   not one-per-(segment, activity) as before, since that's exactly the
+   restriction that made a second real pass unrecordable even in
+   principle.
 
 A track with times IS NULL can't produce an effort (nothing to compute
 elapsed time from) and is excluded by the candidate query itself.
@@ -37,6 +66,18 @@ from app.models import SegmentEffort
 BUFFER_M = 15
 N_SAMPLES = 20
 MIN_MATCH_RATIO = 0.9
+MAX_GAP_POINTS = 30  # tolerate brief GPS dropout without splitting one real pass in
+# two. Started at 15 (matched BUFFER_M numerically, but that was
+# coincidence, not a derivation); real data (segment 22 "peña sola",
+# activity 765) showed a genuine single forward pass fragmented into three
+# islands by a 17-19 point gap where the track briefly drifted just past
+# BUFFER_M near the segment's end. Both real distinct-pass gaps measured so
+# far (una moss's two descents: ~1447 points; this activity's forward vs.
+# backward pass: ~5506 points) are two-plus orders of magnitude larger, so
+# there's wide margin to loosen this without risking a false merge.
+PAD_POINTS = 10  # context around a candidate island so the true segment
+# start/end (which may fall just outside the "within buffer" points
+# themselves) has track to locate onto
 
 _CANDIDATE_SEGMENTS_FOR_TRACK = text(
     """
@@ -88,6 +129,79 @@ _SAMPLE_VERIFICATION = text(
             ST_LineInterpolatePoint(track.geom2d, located.track_fraction)::geography
         ) AS distance_m
     FROM located, track
+    ORDER BY located.i
+    """
+)
+# _SAMPLE_VERIFICATION above is no longer used by _try_match (superseded by
+# the pass-scoped _SAMPLE_VERIFICATION_WKT below) but is kept — it's the
+# exact query app/segments/diagnose*.py import to reproduce/compare against
+# the whole-track behavior that motivated this file's Phase H redesign.
+
+_CANDIDATE_PASSES = text(
+    """
+    WITH track_points AS (
+        SELECT (dp).path[1] AS point_index, (dp).geom AS pt
+        FROM tracks t, LATERAL ST_DumpPoints(ST_Force2D(t.geom)) AS dp
+        WHERE t.id = :track_id
+    ),
+    distances AS (
+        SELECT tp.point_index, ST_Distance(tp.pt::geography, s.geom::geography) AS dist_m
+        FROM track_points tp, segments s
+        WHERE s.id = :segment_id
+    ),
+    close AS (
+        SELECT point_index, dist_m,
+               point_index - LAG(point_index) OVER (ORDER BY point_index) AS gap
+        FROM distances
+        WHERE dist_m <= :buffer_m
+    ),
+    grouped AS (
+        SELECT point_index, dist_m,
+               SUM(CASE WHEN gap IS NULL OR gap > :max_gap THEN 1 ELSE 0 END)
+                 OVER (ORDER BY point_index) AS pass_group
+        FROM close
+    )
+    SELECT pass_group, MIN(point_index) AS start_idx, MAX(point_index) AS end_idx
+    FROM grouped
+    GROUP BY pass_group
+    ORDER BY start_idx
+    """
+)
+
+_PADDED_POINTS = text(
+    """
+    SELECT (dp).path[1] AS point_index, ST_X((dp).geom) AS lon, ST_Y((dp).geom) AS lat
+    FROM tracks t, LATERAL ST_DumpPoints(ST_Force2D(t.geom)) AS dp
+    WHERE t.id = :track_id
+      AND (dp).path[1] BETWEEN :start_idx AND :end_idx
+    ORDER BY point_index
+    """
+)
+
+# Same shape as _SAMPLE_VERIFICATION, but against a WKT sub-track built in
+# Python from one isolated candidate pass's own points (see _try_match),
+# not a track_id lookup against the whole track.
+_SAMPLE_VERIFICATION_WKT = text(
+    """
+    WITH samples AS (
+        SELECT i, ST_LineInterpolatePoint(s.geom, i::float / :n_samples) AS sample_point
+        FROM segments s, generate_series(0, :n_samples) AS i
+        WHERE s.id = :segment_id
+    ),
+    sub_track AS (
+        SELECT ST_GeomFromText(:sub_track_wkt, 4326) AS geom2d
+    ),
+    located AS (
+        SELECT samples.i, samples.sample_point,
+               ST_LineLocatePoint(sub_track.geom2d, samples.sample_point) AS track_fraction
+        FROM samples, sub_track
+    )
+    SELECT located.i, located.track_fraction,
+           ST_Distance(
+               located.sample_point::geography,
+               ST_LineInterpolatePoint(sub_track.geom2d, located.track_fraction)::geography
+           ) AS distance_m
+    FROM located, sub_track
     ORDER BY located.i
     """
 )
@@ -189,59 +303,123 @@ def _evaluate_samples(
     return start_fraction, end_fraction
 
 
-async def _effort_exists(session: AsyncSession, segment_id: int, activity_id: int) -> bool:
+async def _effort_overlaps_existing(
+    session: AsyncSession,
+    segment_id: int,
+    activity_id: int,
+    started_at: datetime.datetime,
+    ended_at: datetime.datetime,
+) -> bool:
+    """Replaces the old _effort_exists (any row for this (segment, activity)
+    pair) — that was exactly the restriction that made a second real pass
+    unrecordable even in principle. This checks time-window overlap instead,
+    so a genuinely repeated pass gets its own effort row, while re-matching
+    the same pass (e.g. on rescan) doesn't create a duplicate."""
     existing = await session.execute(
         text(
-            "SELECT 1 FROM segment_efforts WHERE segment_id = :segment_id "
-            "AND activity_id = :activity_id"
+            """
+            SELECT 1 FROM segment_efforts
+            WHERE segment_id = :segment_id AND activity_id = :activity_id
+              AND achieved_at < :ended_at
+              AND (achieved_at + (elapsed_time_s * INTERVAL '1 second')) > :started_at
+            """
         ),
-        {"segment_id": segment_id, "activity_id": activity_id},
+        {
+            "segment_id": segment_id,
+            "activity_id": activity_id,
+            "started_at": started_at,
+            "ended_at": ended_at,
+        },
     )
     return existing.first() is not None
 
 
 async def _try_match(
     session: AsyncSession, segment_id: int, track_id: int, activity_id: int
-) -> SegmentEffort | None:
-    if await _effort_exists(session, segment_id, activity_id):
-        return None
-
+) -> list[SegmentEffort]:
     times = await session.scalar(
         text("SELECT times FROM tracks WHERE id = :track_id"), {"track_id": track_id}
     )
     if not times:
-        return None
+        return []
 
+    n_track_points = await session.scalar(
+        text("SELECT ST_NPoints(geom) FROM tracks WHERE id = :track_id"), {"track_id": track_id}
+    )
     segment_length_m = await session.scalar(
         text("SELECT ST_Length(geom::geography) FROM segments WHERE id = :segment_id"),
         {"segment_id": segment_id},
     )
 
-    rows = (
+    passes = (
         await session.execute(
-            _SAMPLE_VERIFICATION,
-            {"segment_id": segment_id, "track_id": track_id, "n_samples": N_SAMPLES},
+            _CANDIDATE_PASSES,
+            {
+                "segment_id": segment_id,
+                "track_id": track_id,
+                "buffer_m": BUFFER_M,
+                "max_gap": MAX_GAP_POINTS,
+            },
         )
     ).all()
-    result = _evaluate_samples(rows, times, segment_length_m)
-    if result is None:
-        return None
-    start_fraction, end_fraction = result
 
-    started = _fraction_to_time(times, start_fraction)
-    ended = _fraction_to_time(times, end_fraction)
-    elapsed_s = int((ended - started).total_seconds())
-    if elapsed_s <= 0:
-        return None
+    efforts: list[SegmentEffort] = []
+    for p in passes:
+        pad_start = max(1, p.start_idx - PAD_POINTS)
+        pad_end = min(n_track_points, p.end_idx + PAD_POINTS)
 
-    effort = SegmentEffort(
-        segment_id=segment_id,
-        activity_id=activity_id,
-        elapsed_time_s=elapsed_s,
-        achieved_at=started,
-    )
-    session.add(effort)
-    return effort
+        points = (
+            await session.execute(
+                _PADDED_POINTS,
+                {"track_id": track_id, "start_idx": pad_start, "end_idx": pad_end},
+            )
+        ).all()
+        if len(points) < 2:
+            continue
+
+        # ST_DumpPoints' path[1] is 1-indexed; tracks.times is a plain
+        # 0-indexed list aligned 1:1 with the geometry's vertices in order
+        # (see db_writer.py) — point_index - 1 for the correct element,
+        # sliced to line up exactly with sub_track_wkt's own point sequence
+        # so _evaluate_samples' fraction-to-time lookup resolves within
+        # this pass's own timeline, not the whole track's.
+        pass_times = [times[pt.point_index - 1] for pt in points]
+        sub_track_wkt = "LINESTRING(" + ", ".join(f"{pt.lon} {pt.lat}" for pt in points) + ")"
+
+        sample_rows = (
+            await session.execute(
+                _SAMPLE_VERIFICATION_WKT,
+                {
+                    "segment_id": segment_id,
+                    "sub_track_wkt": sub_track_wkt,
+                    "n_samples": N_SAMPLES,
+                },
+            )
+        ).all()
+        result = _evaluate_samples(sample_rows, pass_times, segment_length_m)
+        if result is None:
+            continue
+        start_fraction, end_fraction = result
+
+        started = _fraction_to_time(pass_times, start_fraction)
+        ended = _fraction_to_time(pass_times, end_fraction)
+        elapsed_s = int((ended - started).total_seconds())
+        if elapsed_s <= 0:
+            continue
+
+        if await _effort_overlaps_existing(session, segment_id, activity_id, started, ended):
+            continue
+
+        effort = SegmentEffort(
+            segment_id=segment_id,
+            activity_id=activity_id,
+            elapsed_time_s=elapsed_s,
+            achieved_at=started,
+        )
+        session.add(effort)
+        efforts.append(effort)
+
+    return efforts
 
 
 async def match_activity_against_segments(
@@ -264,9 +442,7 @@ async def match_activity_against_segments(
 
     efforts = []
     for (segment_id,) in candidates:
-        effort = await _try_match(session, segment_id, track_id, activity_id)
-        if effort is not None:
-            efforts.append(effort)
+        efforts.extend(await _try_match(session, segment_id, track_id, activity_id))
     return efforts
 
 
@@ -281,9 +457,7 @@ async def match_segment_against_activities(
 
     efforts = []
     for track_id, activity_id in candidates:
-        effort = await _try_match(session, segment_id, track_id, activity_id)
-        if effort is not None:
-            efforts.append(effort)
+        efforts.extend(await _try_match(session, segment_id, track_id, activity_id))
     return efforts
 
 

@@ -689,6 +689,17 @@ async def segment_rescan(
         return templates.TemplateResponse(
             request, "segments/not_found.html", {}, status_code=404
         )
+    # Delete-then-rebuild, not "add anything newly possible" — that used to
+    # be safely idempotent when the only thing that could change between
+    # rescans was new activity data, but an *algorithm* change (Phase H)
+    # needs this too: existing efforts computed by the old matching logic
+    # are stale and need replacing, not left in place with new ones added
+    # around them (segment_efforts.segment_id is ON DELETE CASCADE, but
+    # that's for segment deletion — a rescan needs its own explicit clear).
+    await db.execute(
+        text("DELETE FROM segment_efforts WHERE segment_id = :segment_id"),
+        {"segment_id": segment_id},
+    )
     await match_segment_against_activities(db, segment_id)
     await db.commit()
     return RedirectResponse(url=f"/segments/{segment_id}", status_code=303)

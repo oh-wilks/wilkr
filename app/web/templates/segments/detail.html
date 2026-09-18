@@ -25,7 +25,11 @@
           <button type="submit">Rename</button>
         </form>
         <a href="/segments/{{ segment.id }}/edit">Edit start/end</a>
-        <form method="post" action="/segments/{{ segment.id }}/rescan">
+        <form
+          method="post"
+          action="/segments/{{ segment.id }}/rescan"
+          onsubmit="return confirm('This recomputes all {{ efforts | length }} effort record{{ "s" if efforts | length != 1 else "" }} for this segment from scratch. Continue?');"
+        >
           <button type="submit">Rescan</button>
         </form>
         <form

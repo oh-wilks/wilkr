@@ -297,6 +297,89 @@ Verified graceful degradation too: an activity with streams but no track
 still gets full chart-to-chart sync, just no map cursor (guarded, not a
 crash).
 
+## Phase H — multi-pass matching (an activity can traverse a segment more than once) 🚧 In progress (2026-09-18)
+
+User-reported: "I'm pretty sure it's not catching all the efforts." Diagnosed
+with two purpose-built scripts (`app/segments/diagnose.py`,
+`diagnose_activity.py`) against real data rather than guessed — findings
+below are from actual output, not theory.
+
+**Two distinct failure modes found, not one:**
+
+1. **Ambiguous ordering on roads traveled in both directions within one
+   activity** (segment 22 "peña sola", a road ridden out-and-back on many
+   activities). Samples show near-perfect distance matches (`worst_sample`
+   often 3–14m) but a *chain_ratio* far below the 90% requirement (down to
+   5%) — the raw pass rate is fine, only the monotonic-ordering check
+   fails. Mechanism: `ST_LineLocatePoint` returns the single closest point
+   *anywhere on the whole track*; when the track revisits the same
+   physical space, small GPS noise between consecutive segment samples can
+   flip which pass is "closest," fragmenting what should be one clean
+   monotonic run into two interleaved, roughly-equal clusters.
+2. **A confirmed real case, not inferred** (segment 26 "una moss", activity
+   2 — user-verified: rode this descent twice in one ride).
+   `diagnose_activity.py`'s raw sample dump showed something more
+   fundamental than case 1: **zero scatter** — all 21 samples landed in
+   one tight, cleanly-increasing fraction window (0.41→0.56), `dist_m =
+   0.0` throughout. No trace of a second pass anywhere in the output. Root
+   cause: `ST_LineLocatePoint` can only ever return *one* location — the
+   single nearest point on the entire track. If pass #1 happens to be
+   marginally closer than pass #2 for literally every one of the 21
+   segment samples (plausible if the two descents aren't pixel-identical),
+   pass #2 never enters the computation at all, for any sample, at any
+   threshold. This is not a tuning problem — no adjustment of
+   `MIN_MATCH_RATIO`/`BUFFER_M`/`N_SAMPLES` can fix it, because the
+   underlying primitive the whole algorithm samples through structurally
+   cannot represent "there were two matches." Compounded by `_try_match`'s
+   `_effort_exists` check, which bails out before any computation runs at
+   all once *one* effort is already recorded for a (segment, activity)
+   pair — so even a differently-designed distance check would still need
+   that hard limit removed.
+
+**The fix is a genuinely different algorithm shape, not a parameter
+change** — sample the *segment* against the whole track (today's
+approach) can only ever find one location; the redesign instead walks the
+*track's own chronological point sequence* looking for contiguous
+near-segment stretches, which naturally separates multiple passes because
+they're separated in time/point-index, not just in space:
+
+1. **Candidate-pass detection**: `ST_DumpPoints` the track, compute each
+   point's distance to the segment, and group consecutive within-buffer
+   points into "islands" via the standard gaps-and-islands SQL pattern
+   (`SUM(...) OVER (ORDER BY point_index)`), tolerating small gaps (a few
+   points) from momentary GPS dropout without splitting a genuine single
+   pass in two. Each island is a candidate pass — this step alone is what
+   directly fixes case 2 (una moss): "una moss" produces two islands
+   instead of one, at genuinely different point-index ranges, because
+   they're separated in the track's own timeline, which case 1's
+   whole-track nearest-point search has no access to.
+2. **Per-pass verification**: for each candidate island (padded slightly
+   at both ends), build a sub-track from just that island's own dumped
+   points (`ST_MakeLine`, not a length-fraction-based `ST_LineSubstring`
+   cut — GPS speed isn't constant, so a fraction-based cut would misplace
+   the boundary on climbs vs. descents) and re-run essentially today's
+   existing sample-and-verify logic (segment samples located via
+   `ST_LineLocatePoint`, monotonic chain, `MIN_MATCH_RATIO`) — but scoped
+   to this one geometrically-isolated sub-track, where the ambiguity
+   between passes structurally cannot occur, since the other pass's points
+   aren't part of this sub-track at all. This step is what fixes case 1
+   (peña sola): each direction of travel becomes its own isolated
+   sub-track, so there's nothing left to interleave with.
+3. **Drop the one-effort-per-(segment,activity) limit**: `_effort_exists`
+   becomes a per-*time-window* overlap check instead of a per-(segment,
+   activity) existence check, so a genuinely repeated pass gets its own
+   effort row rather than being silently dropped.
+
+**Verification plan before this replaces the live matcher**: validate the
+new candidate-pass-detection query standalone against segment 26/activity
+2 first (must find exactly 2 islands) and segment 22/several of its known
+near-miss activities (must find 1 clean island per direction, each
+independently passing verification) *before* wiring it into
+`match_activity_against_segments`/`match_segment_against_activities` —
+same "prove the new piece in isolation before it goes live" discipline
+this session already used for the units-mismatch fix (Phase B) and the
+gear date-parsing bug.
+
 ## Phase G — themed modal component (replacing native confirm()/prompt())
 
 Delete, rename, and edit's "this will recompute effort history" warning
