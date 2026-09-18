@@ -653,3 +653,78 @@ async def segment_detail(
             "distance_m": distance_m,
         },
     )
+
+
+@router.get("/segments/{segment_id}/efforts/{effort_id}")
+async def segment_effort_detail(
+    request: Request, segment_id: int, effort_id: int, db: AsyncSession = Depends(get_db)
+):
+    row = (
+        await db.execute(
+            text(
+                """
+                SELECT se.id, se.segment_id, se.activity_id, se.elapsed_time_s, se.achieved_at,
+                       a.name AS activity_name, s.name AS segment_name
+                FROM segment_efforts se
+                JOIN activities a ON a.id = se.activity_id
+                JOIN segments s ON s.id = se.segment_id
+                WHERE se.id = :effort_id AND se.segment_id = :segment_id
+                """
+            ),
+            {"effort_id": effort_id, "segment_id": segment_id},
+        )
+    ).first()
+    if row is None:
+        return templates.TemplateResponse(
+            request, "segments/not_found.html", {}, status_code=404
+        )
+
+    user_id = await _get_the_user_id(db)
+    rank_row = (
+        await db.execute(
+            text(
+                """
+                WITH ranked AS (
+                    SELECT se.id, RANK() OVER (ORDER BY se.elapsed_time_s) AS rank,
+                           COUNT(*) OVER () AS total
+                    FROM segment_efforts se
+                    JOIN activities a ON a.id = se.activity_id
+                    WHERE se.segment_id = :segment_id AND a.user_id = :user_id
+                )
+                SELECT rank, total FROM ranked WHERE id = :effort_id
+                """
+            ),
+            {"segment_id": segment_id, "user_id": user_id, "effort_id": effort_id},
+        )
+    ).first()
+
+    window_start = row.achieved_at
+    window_end = row.achieved_at + datetime.timedelta(seconds=row.elapsed_time_s)
+
+    stream_rows = list(
+        (
+            await db.execute(select(Stream).where(Stream.activity_id == row.activity_id))
+        )
+        .scalars()
+        .all()
+    )
+    streams = {}
+    for stream in stream_rows:
+        sliced = [
+            p
+            for p in stream.data
+            if window_start <= datetime.datetime.fromisoformat(p["t"]) <= window_end
+        ]
+        if sliced:
+            streams[stream.type] = decimate(sliced)
+
+    return templates.TemplateResponse(
+        request,
+        "segments/effort_detail.html",
+        {
+            "effort": row,
+            "rank": rank_row.rank if rank_row else None,
+            "total_efforts": rank_row.total if rank_row else None,
+            "streams": streams,
+        },
+    )

@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}{{ effort.segment_name }} effort — wilkr{% endblock %}
+
+{% block content %}
+<div class="detail-header">
+  <h1>{{ effort.segment_name }}</h1>
+  <div class="meta">
+    effort from <a href="/activities/{{ effort.activity_id }}">{{ effort.activity_name }}</a>
+    &nbsp;·&nbsp;<a href="/segments/{{ effort.segment_id }}">back to segment</a>
+  </div>
+</div>
+
+<div class="stat-grid">
+  <div class="stat-tile"><div class="value">{{ effort.elapsed_time_s | duration }}</div><div class="label">Elapsed time</div></div>
+  <div class="stat-tile"><div class="value">{{ rank | rank_label(total_efforts) if rank else "—" }}</div><div class="label">Rank</div></div>
+  <div class="stat-tile"><div class="value">{{ effort.achieved_at | date }}</div><div class="label">Achieved</div></div>
+</div>
+
+{% for type in ["heart_rate", "elevation", "speed", "cadence", "power"] %}
+  {% if streams.get(type) %}
+  <div class="chart-card">
+    <div class="chart-label">{{ type.replace("_", " ") }}</div>
+    <canvas id="chart-{{ type }}" height="70"></canvas>
+  </div>
+  {% endif %}
+{% endfor %}
+
+{% if not streams %}
+<div class="empty-state">
+  No stream data available for this effort's time window — the source activity may not have
+  recorded heart rate, speed, cadence, or power for this stretch.
+</div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+{% if streams %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.5.1/chart.umd.min.js"></script>
+<script>
+  (function () {
+    var accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
+    var secondary = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim();
+
+    // Same generic per-type chart pattern as activities/detail.html — the
+    // data shape ({t, v} pairs, decimated) is identical, just a slice of
+    // it (this effort's time window) rather than the whole activity.
+    var streams = {{ streams | tojson }};
+    var labelNames = {
+      heart_rate: 'Heart Rate (bpm)',
+      elevation: 'Elevation (m)',
+      speed: 'Speed (m/s)',
+      cadence: 'Cadence (rpm)',
+      power: 'Power (W)',
+    };
+    Object.keys(streams).forEach(function (type) {
+      var points = streams[type];
+      if (!points || !points.length) return;
+      var canvas = document.getElementById('chart-' + type);
+      if (!canvas) return;
+      new Chart(canvas, {
+        type: 'line',
+        data: {
+          labels: points.map(function (p) { return (p.t || '').slice(11, 19); }),
+          datasets: [{
+            label: labelNames[type] || type,
+            data: points.map(function (p) { return p.v; }),
+            borderColor: accent,
+            borderWidth: 1.5,
+            pointRadius: 0,
+            tension: 0.15,
+          }],
+        },
+        options: {
+          responsive: true,
+          animation: false,
+          scales: {
+            x: { display: false },
+            y: { ticks: { color: secondary }, grid: { color: 'rgba(128,131,158,0.15)' } },
+          },
+          plugins: { legend: { display: false } },
+        },
+      });
+    });
+  })();
+</script>
+{% endif %}
+{% endblock %}

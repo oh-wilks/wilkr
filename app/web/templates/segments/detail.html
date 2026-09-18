@@ -72,7 +72,7 @@
 
 <table class="laps">
   <thead>
-    <tr><th></th><th>Activity</th><th>Date</th><th>Time</th></tr>
+    <tr><th></th><th style="text-align:left;">Activity</th><th>Date</th><th>Time</th></tr>
   </thead>
   <tbody>
     {% for effort in efforts %}
@@ -80,7 +80,7 @@
       <td>{% if effort.rank == 1 %}PR{% endif %}</td>
       <td style="text-align:left;"><a href="/activities/{{ effort.activity_id }}">{{ effort.activity_name }}</a></td>
       <td>{{ effort.achieved_at | date_short }}</td>
-      <td>{{ effort.elapsed_time_s | duration }}</td>
+      <td><a href="/segments/{{ segment.id }}/efforts/{{ effort.id }}">{{ effort.elapsed_time_s | duration }}</a></td>
     </tr>
     {% endfor %}
   </tbody>

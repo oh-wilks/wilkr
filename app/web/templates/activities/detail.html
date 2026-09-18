@@ -35,7 +35,7 @@
 {% if segment_efforts %}
 <table class="laps">
   <thead>
-    <tr><th>Rank</th><th>Segment</th><th>Time</th></tr>
+    <tr><th>Rank</th><th style="text-align:left;">Segment</th><th>Time</th></tr>
   </thead>
   <tbody>
     {% for effort in segment_efforts %}
@@ -49,7 +49,7 @@
 </table>
 {% endif %}
 
-{% for type in ["heart_rate", "elevation", "speed", "cadence", "power"] %}
+{% for type in ["elevation", "heart_rate", "speed", "cadence", "power"] %}
   {% if streams.get(type) %}
   <div class="chart-card">
     <div class="chart-label">{{ type.replace("_", " ") }}</div>

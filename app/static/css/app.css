@@ -280,6 +280,7 @@ table.laps {
   width: 100%;
   border-collapse: collapse;
   font-size: 12px;
+  margin-bottom: 16px;
 }
 
 table.laps th, table.laps td {

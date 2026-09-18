@@ -170,22 +170,31 @@ rather than after.
 - "My efforts" scatter — already satisfied this ask as noted in the
   original plan; no changes needed.
 
-## Phase D — effort-level analysis
+## Phase D — effort-level analysis ✅ Done (2026-09-18)
 
 The "do we need an effort table" question — answered above: no new table,
-derive from existing `streams` sliced to `[achieved_at, achieved_at +
+derived from existing `streams` sliced to `[achieved_at, achieved_at +
 elapsed_time_s]` on the parent activity.
 
-- Effort detail view (`/segments/{id}/efforts/{effort_id}` or similar):
-  speed/pace and HR mini-charts for just that effort's time window, derived
-  from the parent activity's existing `heart_rate`/`speed` streams — no
-  schema change needed.
-- Needs graceful degradation: Strava GPX-only imports may lack speed/HR/power
-  streams depending on the source file: show whatever streams exist, same
-  pattern activity detail already uses (`{% if streams.get(type) %}`).
-- Natural follow-on once this exists: compare two efforts side by side
-  (overlay two speed/HR profiles for the same segment) — not now, just
-  flagging it as the obvious next step once single-effort detail works.
+- `GET /segments/{id}/efforts/{effort_id}` — stat tiles (elapsed time, rank
+  via the same `RANK() OVER (...)` shape as segment detail, achieved date)
+  plus one mini chart per available stream type, reusing
+  `activities/detail.html`'s exact generic per-type Chart.js pattern (same
+  `{t, v}` data shape, just a slice of it rather than the whole activity).
+  Graceful degradation confirmed against real data: an activity with only
+  heart_rate/elevation/speed correctly shows those 3 charts and skips
+  cadence/power, no empty chart cards.
+- Segment detail's effort table now links each effort's time to this page.
+- Verified precisely, not just structurally: a real effort's sliced stream
+  ran from its exact `achieved_at` to exactly `achieved_at +
+  elapsed_time_s` (157s effort → stream span 01:26:16–01:28:53, 157
+  seconds to the second) — confirms the slice boundary is exact, not
+  approximate. Also verified the URL validates the effort belongs to the
+  given segment (a mismatched segment/effort pair 404s, not just an
+  invalid effort id) and that rank labeling is correct at both ends (a
+  PR effort shows "PR", not "1st best of N").
+- Two-effort side-by-side comparison — not built now, still the obvious
+  next step once this existed, per the original plan.
 
 ## Phase E — discovery, as segment count grows
 
@@ -200,6 +209,44 @@ elapsed_time_s]` on the parent activity.
   wilkr is single-user and everything already belongs to you; mainly useful
   once the segment count is large enough that surfacing a "favorites" subset
   on a dashboard actually helps.
+
+## Phase F — synchronized hover: charts ↔ map
+
+Hovering any data plot (activity detail's heart_rate/elevation/speed/
+cadence/power charts, segment detail's elevation profile from Phase C)
+shows a playhead on that chart *and* moves a cursor marker on the
+corresponding map to the matching position along the track — the classic
+"hover the graph, see where you were" pattern.
+
+Two different indexing domains to reconcile, not one:
+- **Activity detail's streams are time-indexed** (`{t, v}` pairs). Mapping
+  a hovered timestamp back to a map position means locating it in
+  `Track.times[]` (the parallel timestamp array added earlier for segment
+  matching's elapsed-time computation) to find the corresponding vertex —
+  a second, independent reuse of data that already exists for a different
+  reason, not a new column.
+- **Segment detail's elevation profile is distance-indexed** (`dist_m`,
+  from Phase C's `get_segment_elevation_profile`) — simpler, maps directly
+  to a position along the segment's own already-rendered polyline, no time
+  lookup needed.
+
+Real complexity worth flagging before starting, not discovering mid-build:
+activity detail can show *up to five* charts at once (one per stream type
+present). Hovering any one of them should sync all three things together:
+that chart's own playhead, the same instant reflected as playheads on
+every *other* visible chart (hover elevation, see the matching point on
+heart rate too), and the map cursor — a shared "current hover position"
+state broadcast to N chart instances plus the map, not just a single
+chart's own mouseover handler.
+
+Reuse already in the codebase, not starting from scratch: the segment
+creation flow's `playheadPlugin` (a small per-chart Chart.js plugin
+drawing a vertical line from `chart.$playheadXs`) is directly adaptable
+for the chart-side playhead; the map-cursor-marker concept already exists
+in two different forms (`segments/new.html`'s ghost marker during slider
+drag, `activities/detail.html`'s hover-to-highlight segment polylines) —
+this is a third variation on a pattern this codebase already has twice,
+not a new one.
 
 ## Explicitly out of scope, with reasoning
 
