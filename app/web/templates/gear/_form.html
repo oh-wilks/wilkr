@@ -1,0 +1,47 @@
+<form method="post" action="{{ '/gear/' ~ equipment.id ~ '/update' if equipment else '/gear' }}">
+  <div class="stat-grid" style="grid-template-columns: 2fr 1fr;">
+    <div class="stat-tile">
+      <label for="name" class="label">Name</label><br>
+      <input type="text" id="name" name="name" required value="{{ equipment.name if equipment else '' }}" style="width:100%; margin-top:6px; background:var(--bg); color:var(--text-primary); border:1px solid var(--border); border-radius:4px; padding:6px 8px; font-family:inherit;">
+    </div>
+    <div class="stat-tile">
+      <label for="gear_type" class="label">Type</label><br>
+      <select id="gear_type" name="gear_type" style="width:100%; margin-top:6px; background:var(--bg); color:var(--text-primary); border:1px solid var(--border); border-radius:4px; padding:6px 8px; font-family:inherit;">
+        {% for value, label in [('bike', 'Bike'), ('shoe', 'Shoe'), ('ski', 'Ski'), ('other', 'Other')] %}
+        <option value="{{ value }}" {% if equipment and equipment.type == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    </div>
+  </div>
+
+  <div class="stat-grid" style="grid-template-columns: 1fr 1fr 1fr; margin-top:16px;">
+    <div class="stat-tile">
+      <label for="brand" class="label">Brand</label><br>
+      <input type="text" id="brand" name="brand" value="{{ equipment.brand or '' if equipment else '' }}" style="width:100%; margin-top:6px; background:var(--bg); color:var(--text-primary); border:1px solid var(--border); border-radius:4px; padding:6px 8px; font-family:inherit;">
+    </div>
+    <div class="stat-tile">
+      <label for="model" class="label">Model</label><br>
+      <input type="text" id="model" name="model" value="{{ equipment.model or '' if equipment else '' }}" style="width:100%; margin-top:6px; background:var(--bg); color:var(--text-primary); border:1px solid var(--border); border-radius:4px; padding:6px 8px; font-family:inherit;">
+    </div>
+    <div class="stat-tile">
+      <label for="purchased_at" class="label">Purchased</label><br>
+      <input type="date" id="purchased_at" name="purchased_at" value="{{ equipment.purchased_at.isoformat() if equipment and equipment.purchased_at else '' }}" style="width:100%; margin-top:6px; background:var(--bg); color:var(--text-primary); border:1px solid var(--border); border-radius:4px; padding:6px 8px; font-family:inherit;">
+    </div>
+  </div>
+
+  {% if sports %}
+  <div class="stat-tile" style="margin-top:16px;">
+    <label class="label">Default sports</label>
+    <div style="margin-top:8px; display:flex; flex-wrap:wrap; gap:4px 16px;">
+      {% for sport in sports %}
+      <label style="font-size:13px; display:flex; align-items:center; gap:6px; font-weight:normal;">
+        <input type="checkbox" name="sport_ids" value="{{ sport.id }}" {% if sport.id in selected_sport_ids %}checked{% endif %}>
+        {{ sport.name }}
+      </label>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <button type="submit" class="theme-toggle" style="margin-top:16px;">{{ "Save changes" if equipment else "Add gear" }}</button>
+</form>

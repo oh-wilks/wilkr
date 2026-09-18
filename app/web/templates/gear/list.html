@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Gear — wilkr{% endblock %}
+{% block content %}
+<div class="detail-header">
+  <h1>Gear</h1>
+</div>
+
+{% if not gear_by_type %}
+<div class="empty-state">No gear yet — add a bike or pair of shoes below.</div>
+{% endif %}
+
+{% for type_value, type_label in gear_types %}
+{% set items = gear_by_type.get(type_value, []) %}
+{% if items %}
+{% set active = items | rejectattr('retired_at') | list %}
+{% set retired = items | selectattr('retired_at') | list %}
+<div class="chart-label" style="margin-top:20px;">{{ type_label }}</div>
+<table class="laps">
+  <thead>
+    <tr>
+      <th style="text-align:left;">Name</th>
+      <th>Brand / model</th>
+      <th>Distance</th>
+      <th>Purchased</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for item in active %}
+    <tr>
+      <td style="text-align:left;">{{ item.name }}</td>
+      <td>{{ [item.brand, item.model] | select | join(' ') }}</td>
+      <td>{{ item.distance_m | distance }}</td>
+      <td>{{ item.purchased_at | date_short }}</td>
+      <td>
+        <details class="action-menu">
+          <summary class="theme-toggle">&hellip;</summary>
+          <div class="action-menu-items">
+            <a href="/gear/{{ item.id }}/edit">Edit</a>
+            <form method="post" action="/gear/{{ item.id }}/retire">
+              <button type="submit">Retire</button>
+            </form>
+          </div>
+        </details>
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% if retired %}
+<details style="margin: -8px 0 16px;">
+  <summary style="color:var(--text-secondary); font-size:12px; cursor:pointer;">+{{ retired | length }} retired</summary>
+  <table class="laps" style="margin-top:8px;">
+    <tbody>
+      {% for item in retired %}
+      <tr>
+        <td style="text-align:left; color:var(--text-secondary);">{{ item.name }}</td>
+        <td style="color:var(--text-secondary);">{{ [item.brand, item.model] | select | join(' ') }}</td>
+        <td style="color:var(--text-secondary);">{{ item.distance_m | distance }}</td>
+        <td style="color:var(--text-secondary);">retired {{ item.retired_at | date_short }}</td>
+        <td>
+          <details class="action-menu">
+            <summary class="theme-toggle">&hellip;</summary>
+            <div class="action-menu-items">
+              <a href="/gear/{{ item.id }}/edit">Edit</a>
+              <form method="post" action="/gear/{{ item.id }}/retire">
+                <button type="submit">Reactivate</button>
+              </form>
+            </div>
+          </details>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</details>
+{% endif %}
+{% endif %}
+{% endfor %}
+
+<div class="chart-card" style="margin-top:24px;">
+  <div class="chart-label">Add gear</div>
+  {% include "gear/_form.html" %}
+</div>
+{% endblock %}

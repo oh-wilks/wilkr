@@ -11,7 +11,19 @@
   <div class="meta">
     <span class="sport-tag">{{ activity.sport.name }}</span>
     &nbsp;{{ activity.started_at | date }}
-    {% if activity.equipment %}&nbsp;·&nbsp;{{ activity.equipment.name }}{% endif %}
+    {% if gear_options %}
+    &nbsp;·&nbsp;
+    <form method="post" action="/activities/{{ activity.id }}/equipment" style="display:inline;">
+      <select name="equipment_id" onchange="this.form.submit()" style="background:var(--bg); color:var(--text-secondary); border:1px solid var(--border); border-radius:4px; padding:2px 6px; font-family:inherit; font-size:12px;">
+        <option value="">no gear</option>
+        {% for item in gear_options %}
+        <option value="{{ item.id }}" {% if activity.equipment_id == item.id %}selected{% endif %}>{{ item.name }}{% if item.retired_at %} (retired){% endif %}</option>
+        {% endfor %}
+      </select>
+    </form>
+    {% elif activity.equipment %}
+    &nbsp;·&nbsp;{{ activity.equipment.name }}
+    {% endif %}
   </div>
   {% if activity.description %}
   <p>{{ activity.description }}</p>

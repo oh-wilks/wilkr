@@ -14,6 +14,7 @@ from app.db.session import get_db
 from app.models import (
     Activity,
     ActivityLap,
+    Equipment,
     GarminSyncState,
     Segment,
     Sport,
@@ -192,6 +193,22 @@ async def activity_detail(
         )
     ).all()
 
+    # No retired_at filter here (unlike the /gear default-sport pickers) —
+    # a past activity may genuinely have used gear that's since been
+    # retired, and correcting/back-filling that assignment should still be
+    # possible; the template just labels retired options for clarity.
+    gear_options = list(
+        (
+            await db.execute(
+                select(Equipment)
+                .where(Equipment.user_id == activity.user_id)
+                .order_by(Equipment.name)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
     return templates.TemplateResponse(
         request,
         "activities/detail.html",
@@ -202,8 +219,24 @@ async def activity_detail(
             "streams": streams,
             "laps": laps,
             "segment_efforts": segment_efforts,
+            "gear_options": gear_options,
         },
     )
+
+
+@router.post("/activities/{activity_id}/equipment")
+async def activity_set_equipment(
+    request: Request,
+    activity_id: int,
+    equipment_id: str = Form(""),
+    db: AsyncSession = Depends(get_db),
+):
+    await db.execute(
+        text("UPDATE activities SET equipment_id = CAST(:equipment_id AS integer) WHERE id = :activity_id"),
+        {"equipment_id": int(equipment_id) if equipment_id else None, "activity_id": activity_id},
+    )
+    await db.commit()
+    return RedirectResponse(url=f"/activities/{activity_id}", status_code=303)
 
 
 # --------------------------------------------------------------------------
@@ -805,3 +838,184 @@ async def segment_effort_detail(
             "streams": streams,
         },
     )
+
+
+_GEAR_TYPES = [("bike", "Bikes"), ("shoe", "Shoes"), ("ski", "Skis"), ("other", "Other")]
+
+
+def _parse_form_date(value: str) -> datetime.date | None:
+    # A bare CAST(:param AS date) only settles Postgres's parameter-type
+    # ambiguity — asyncpg still binary-encodes the Python argument directly
+    # as a date, and errors if it's handed a plain ISO string instead of a
+    # real date object (it doesn't parse the string itself).
+    return datetime.date.fromisoformat(value) if value else None
+
+
+async def _set_equipment_sports(db: AsyncSession, equipment_id: int, sport_ids: list[int]) -> None:
+    # Replace-all rather than diffing — same pattern segment editing already
+    # uses for its own join-table-shaped state (segment_efforts on save):
+    # simpler than computing an add/remove delta, and the set is always
+    # small (a handful of sports per gear item).
+    await db.execute(
+        text("DELETE FROM equipment_sports WHERE equipment_id = :equipment_id"),
+        {"equipment_id": equipment_id},
+    )
+    for sport_id in sport_ids:
+        await db.execute(
+            text(
+                "INSERT INTO equipment_sports (equipment_id, sport_id) "
+                "VALUES (:equipment_id, :sport_id)"
+            ),
+            {"equipment_id": equipment_id, "sport_id": sport_id},
+        )
+
+
+@router.get("/gear")
+async def gear_list(request: Request, db: AsyncSession = Depends(get_db)):
+    user_id = await _get_the_user_id(db)
+    rows = (
+        await db.execute(
+            text(
+                """
+                SELECT e.id, e.name, e.type, e.brand, e.model, e.purchased_at, e.retired_at,
+                       COALESCE(SUM(a.distance_m), 0) AS distance_m
+                FROM equipment e
+                LEFT JOIN activities a ON a.equipment_id = e.id
+                WHERE e.user_id = :user_id
+                GROUP BY e.id
+                ORDER BY e.name
+                """
+            ),
+            {"user_id": user_id},
+        )
+    ).all()
+    gear_by_type: dict[str, list] = {}
+    for row in rows:
+        gear_by_type.setdefault(row.type, []).append(row)
+    sports = list((await db.execute(select(Sport).order_by(Sport.name))).scalars().all())
+    return templates.TemplateResponse(
+        request,
+        "gear/list.html",
+        {
+            "gear_types": _GEAR_TYPES,
+            "gear_by_type": gear_by_type,
+            "equipment": None,
+            "sports": sports,
+            "selected_sport_ids": set(),
+        },
+    )
+
+
+@router.post("/gear")
+async def gear_create(
+    request: Request,
+    name: str = Form(...),
+    gear_type: str = Form(...),
+    brand: str = Form(""),
+    model: str = Form(""),
+    purchased_at: str = Form(""),
+    sport_ids: list[int] = Form([]),
+    db: AsyncSession = Depends(get_db),
+):
+    user_id = await _get_the_user_id(db)
+    equipment_id = await db.scalar(
+        text(
+            """
+            INSERT INTO equipment (user_id, name, type, brand, model, purchased_at)
+            VALUES (:user_id, :name, :type, :brand, :model, CAST(:purchased_at AS date))
+            RETURNING id
+            """
+        ),
+        {
+            "user_id": user_id,
+            "name": name.strip(),
+            "type": gear_type,
+            "brand": brand.strip() or None,
+            "model": model.strip() or None,
+            "purchased_at": _parse_form_date(purchased_at),
+        },
+    )
+    await _set_equipment_sports(db, equipment_id, sport_ids)
+    await db.commit()
+    return RedirectResponse(url="/gear", status_code=303)
+
+
+@router.get("/gear/{equipment_id}/edit")
+async def gear_edit_form(
+    request: Request, equipment_id: int, db: AsyncSession = Depends(get_db)
+):
+    equipment = await db.scalar(select(Equipment).where(Equipment.id == equipment_id))
+    if equipment is None:
+        return templates.TemplateResponse(request, "gear/not_found.html", {}, status_code=404)
+    sports = list((await db.execute(select(Sport).order_by(Sport.name))).scalars().all())
+    selected_sport_ids = set(
+        (
+            await db.execute(
+                text("SELECT sport_id FROM equipment_sports WHERE equipment_id = :equipment_id"),
+                {"equipment_id": equipment_id},
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return templates.TemplateResponse(
+        request,
+        "gear/edit.html",
+        {"equipment": equipment, "sports": sports, "selected_sport_ids": selected_sport_ids},
+    )
+
+
+@router.post("/gear/{equipment_id}/update")
+async def gear_update(
+    request: Request,
+    equipment_id: int,
+    name: str = Form(...),
+    gear_type: str = Form(...),
+    brand: str = Form(""),
+    model: str = Form(""),
+    purchased_at: str = Form(""),
+    sport_ids: list[int] = Form([]),
+    db: AsyncSession = Depends(get_db),
+):
+    await db.execute(
+        text(
+            """
+            UPDATE equipment
+            SET name = :name, type = :type, brand = :brand, model = :model,
+                purchased_at = CAST(:purchased_at AS date)
+            WHERE id = :equipment_id
+            """
+        ),
+        {
+            "name": name.strip(),
+            "type": gear_type,
+            "brand": brand.strip() or None,
+            "model": model.strip() or None,
+            "purchased_at": _parse_form_date(purchased_at),
+            "equipment_id": equipment_id,
+        },
+    )
+    await _set_equipment_sports(db, equipment_id, sport_ids)
+    await db.commit()
+    return RedirectResponse(url="/gear", status_code=303)
+
+
+@router.post("/gear/{equipment_id}/retire")
+async def gear_retire(
+    request: Request, equipment_id: int, db: AsyncSession = Depends(get_db)
+):
+    # Single toggle endpoint rather than separate retire/reactivate routes —
+    # retired_at is nullable-means-active (see the model's own comment), so
+    # flipping between the two states is just clearing or setting one column.
+    await db.execute(
+        text(
+            """
+            UPDATE equipment
+            SET retired_at = CASE WHEN retired_at IS NULL THEN CURRENT_DATE ELSE NULL END
+            WHERE id = :equipment_id
+            """
+        ),
+        {"equipment_id": equipment_id},
+    )
+    await db.commit()
+    return RedirectResponse(url="/gear", status_code=303)
