@@ -113,6 +113,7 @@
   (function () {
     var accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim();
     var secondary = getComputedStyle(document.documentElement).getPropertyValue('--text-secondary').trim();
+    var danger = getComputedStyle(document.documentElement).getPropertyValue('--danger').trim();
 
     function hexToRgba(hex, alpha) {
       hex = hex.trim().replace('#', '');
@@ -149,6 +150,44 @@
       });
     }
 
+    // Nearest track index whose cumulative distance is >= dist — same
+    // binary-search pattern as the creation flow's slider.
+    function distanceToIndex(cumDist, dist) {
+      var lo = 0, hi = cumDist.length - 1;
+      while (lo < hi) {
+        var mid = (lo + hi) >> 1;
+        if (cumDist[mid] < dist) lo = mid + 1; else hi = mid;
+      }
+      return lo;
+    }
+
+    // Small per-chart Chart.js plugin drawing one vertical line per
+    // {x, color} entry in chart.$playheadXs — same as the creation flow's,
+    // duplicated here per the project's established per-template
+    // convention for small shared helpers.
+    var playheadPlugin = {
+      id: 'playhead',
+      afterDraw: function (chart) {
+        var xs = chart.$playheadXs;
+        if (!xs || !xs.length) return;
+        var xScale = chart.scales.x;
+        var area = chart.chartArea;
+        var ctx = chart.ctx;
+        ctx.save();
+        ctx.lineWidth = 1.5;
+        xs.forEach(function (p) {
+          var px = xScale.getPixelForValue(p.x);
+          if (px < area.left || px > area.right) return;
+          ctx.strokeStyle = p.color;
+          ctx.beginPath();
+          ctx.moveTo(px, area.top);
+          ctx.lineTo(px, area.bottom);
+          ctx.stroke();
+        });
+        ctx.restore();
+      },
+    };
+
     {% if geojson %}
     var geojson = {{ geojson | safe }};
     var latlngs = geojson.coordinates.map(function (c) { return L.latLng(c[1], c[0]); });
@@ -168,10 +207,12 @@
 
     {% if elevation %}
     var elevPoints = {{ elevation.points | tojson }};
+    var elevTotalDist = elevPoints[elevPoints.length - 1].dist_m;
     var elevCanvas = document.getElementById('chart-elevation-profile');
     if (elevCanvas) {
-      new Chart(elevCanvas, {
+      var elevChart = new Chart(elevCanvas, {
         type: 'line',
+        plugins: [playheadPlugin],
         data: {
           datasets: [{
             label: 'elevation',
@@ -190,7 +231,7 @@
             x: {
               type: 'linear',
               min: 0,
-              max: elevPoints[elevPoints.length - 1].dist_m,
+              max: elevTotalDist,
               ticks: { color: secondary, callback: function (v) { return (v / 1000).toFixed(1) + 'km'; } },
             },
             y: { ticks: { color: secondary }, grid: { color: 'rgba(128,131,158,0.15)' } },
@@ -198,6 +239,45 @@
           plugins: { legend: { display: false }, tooltip: { enabled: false } },
         },
       });
+
+      // Hover the elevation profile -> playhead on the chart + a cursor
+      // marker on the map at the matching position. Mapped by fraction
+      // along each line's own total length, not by assuming the two
+      // totals match exactly — elevPoints comes from a fresh 3D
+      // re-derivation against the source activity's track (Phase C),
+      // segment.geom (behind latlngs/cumDist here) is the segment's own
+      // stored, flattened 2D geometry. Both describe the same physical
+      // path, but aren't guaranteed to be bit-for-bit identical lengths.
+      if (typeof map !== 'undefined' && typeof cumDist !== 'undefined') {
+        var hoverMarker = null;
+        elevCanvas.addEventListener('mousemove', function (evt) {
+          var rect = elevCanvas.getBoundingClientRect();
+          var px = evt.clientX - rect.left;
+          var dist = elevChart.scales.x.getValueForPixel(px);
+          if (dist == null) return;
+          dist = Math.max(0, Math.min(elevTotalDist, dist));
+
+          var frac = elevTotalDist > 0 ? dist / elevTotalDist : 0;
+          var mapIdx = distanceToIndex(cumDist, frac * cumDist[cumDist.length - 1]);
+          var latlng = latlngs[mapIdx];
+
+          if (!hoverMarker) {
+            hoverMarker = L.circleMarker(latlng, {
+              radius: 6, color: danger, fillColor: danger, fillOpacity: 1, weight: 2,
+            }).addTo(map);
+          } else {
+            hoverMarker.setLatLng(latlng);
+          }
+
+          elevChart.$playheadXs = [{ x: dist, color: danger }];
+          elevChart.update('none');
+        });
+        elevCanvas.addEventListener('mouseleave', function () {
+          if (hoverMarker) { map.removeLayer(hoverMarker); hoverMarker = null; }
+          elevChart.$playheadXs = [];
+          elevChart.update('none');
+        });
+      }
     }
     {% endif %}
 

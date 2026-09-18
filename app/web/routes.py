@@ -136,6 +136,16 @@ async def activity_detail(
     geojson = await db.scalar(
         select(func.ST_AsGeoJSON(Track.geom)).where(Track.activity_id == activity_id)
     )
+    track_times = await db.scalar(
+        select(Track.times).where(Track.activity_id == activity_id)
+    )
+    # Parallel to geojson's (undecimated) coordinates array, 1:1 — same
+    # invariant segment matching already relies on. Serialized to ISO
+    # strings here since tojson can't encode raw datetime objects and the
+    # stream {t, v} pairs already use this exact string format (both come
+    # from the same to_naive_utc(...).isoformat() convention), so a hover
+    # timestamp compares directly against either without reparsing.
+    times_iso = [t.isoformat() for t in track_times] if track_times else None
 
     stream_rows = list(
         (
@@ -188,6 +198,7 @@ async def activity_detail(
         {
             "activity": activity,
             "geojson": geojson,
+            "times": times_iso,
             "streams": streams,
             "laps": laps,
             "segment_efforts": segment_efforts,

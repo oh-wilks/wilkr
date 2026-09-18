@@ -115,6 +115,89 @@
       });
     }
 
+    // Nearest index whose timestamp is closest to targetDate — unlike the
+    // map/segment "nearest distance" binary searches elsewhere, this one
+    // explicitly checks the neighbor on both sides, since the different
+    // stream types are decimated independently (different point counts,
+    // so a plain "first >=" search can land noticeably further from
+    // targetDate on a sparser stream than on a denser one).
+    function nearestTimeIndex(sortedDates, targetDate) {
+      var lo = 0, hi = sortedDates.length - 1;
+      while (lo < hi) {
+        var mid = (lo + hi) >> 1;
+        if (sortedDates[mid] < targetDate) lo = mid + 1; else hi = mid;
+      }
+      if (lo > 0 && Math.abs(sortedDates[lo - 1] - targetDate) < Math.abs(sortedDates[lo] - targetDate)) {
+        return lo - 1;
+      }
+      return lo;
+    }
+
+    // Same small per-chart plugin used elsewhere (segments/new.html,
+    // segments/detail.html) — draws one vertical line per {x, color} in
+    // chart.$playheadXs. x is a category-scale index here (these charts
+    // use time-as-labels, not a linear/time scale), not a continuous
+    // value, but the plugin doesn't care either way — it just asks the
+    // scale to convert whatever x is to a pixel.
+    var playheadPlugin = {
+      id: 'playhead',
+      afterDraw: function (chart) {
+        var xs = chart.$playheadXs;
+        if (!xs || !xs.length) return;
+        var xScale = chart.scales.x;
+        var area = chart.chartArea;
+        var ctx = chart.ctx;
+        ctx.save();
+        ctx.lineWidth = 1.5;
+        xs.forEach(function (p) {
+          var px = xScale.getPixelForValue(p.x);
+          if (px < area.left || px > area.right) return;
+          ctx.strokeStyle = p.color;
+          ctx.beginPath();
+          ctx.moveTo(px, area.top);
+          ctx.lineTo(px, area.bottom);
+          ctx.stroke();
+        });
+        ctx.restore();
+      },
+    };
+
+    var chartRegistry = {};
+    var hoverMarker = null;
+
+    function onChartsHover(targetDate) {
+      Object.keys(chartRegistry).forEach(function (type) {
+        var entry = chartRegistry[type];
+        var idx = nearestTimeIndex(entry.times, targetDate);
+        entry.chart.$playheadXs = [{ x: idx, color: danger }];
+        entry.chart.update('none');
+      });
+      {% if geojson %}
+      if (typeof mapTimes !== 'undefined') {
+        var mapIdx = nearestTimeIndex(mapTimes, targetDate);
+        var latlng = latlngs[mapIdx];
+        if (!hoverMarker) {
+          hoverMarker = L.circleMarker(latlng, {
+            radius: 6, color: danger, fillColor: danger, fillOpacity: 1, weight: 2,
+          }).addTo(map);
+        } else {
+          hoverMarker.setLatLng(latlng);
+        }
+      }
+      {% endif %}
+    }
+
+    function clearChartsHover() {
+      Object.keys(chartRegistry).forEach(function (type) {
+        var entry = chartRegistry[type];
+        entry.chart.$playheadXs = [];
+        entry.chart.update('none');
+      });
+      {% if geojson %}
+      if (hoverMarker) { map.removeLayer(hoverMarker); hoverMarker = null; }
+      {% endif %}
+    }
+
     {% if geojson %}
     var geojson = {{ geojson | safe }};
     var latlngs = geojson.coordinates.map(function (c) { return L.latLng(c[1], c[0]); });
@@ -122,6 +205,14 @@
     for (var i = 1; i < latlngs.length; i++) {
       cumDist.push(cumDist[i - 1] + latlngs[i - 1].distanceTo(latlngs[i]));
     }
+    {% if times %}
+    // Parallel to geojson's coordinates, 1:1 — used to answer "where on
+    // the map corresponds to this timestamp" when a stream chart is
+    // hovered. No track (e.g. a GPX with no per-point time, or a track
+    // older than this column) just means the map cursor doesn't move;
+    // chart-to-chart sync still works either way.
+    var mapTimes = {{ times | tojson }}.map(function (t) { return new Date(t); });
+    {% endif %}
     var map = L.map('map');
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '&copy; OpenStreetMap contributors',
@@ -164,8 +255,9 @@
       if (!points || !points.length) return;
       var canvas = document.getElementById('chart-' + type);
       if (!canvas) return;
-      new Chart(canvas, {
+      var chart = new Chart(canvas, {
         type: 'line',
+        plugins: [playheadPlugin],
         data: {
           labels: points.map(function (p) { return (p.t || '').slice(11, 19); }),
           datasets: [{
@@ -187,6 +279,24 @@
           plugins: { legend: { display: false } },
         },
       });
+
+      // Cross-chart + map sync: hovering any one chart moves a playhead on
+      // every visible chart (including itself) and, if the activity has a
+      // track, a cursor marker on the map — all keyed by timestamp, the
+      // one thing every stream type and the map's times[] have in common
+      // regardless of how each was independently decimated.
+      var pointTimes = points.map(function (p) { return new Date(p.t); });
+      chartRegistry[type] = { chart: chart, times: pointTimes };
+
+      canvas.addEventListener('mousemove', function (evt) {
+        var rect = canvas.getBoundingClientRect();
+        var px = evt.clientX - rect.left;
+        var idx = chart.scales.x.getValueForPixel(px);
+        if (idx == null) return;
+        idx = Math.max(0, Math.min(pointTimes.length - 1, Math.round(idx)));
+        onChartsHover(pointTimes[idx]);
+      });
+      canvas.addEventListener('mouseleave', clearChartsHover);
     });
   })();
 </script>

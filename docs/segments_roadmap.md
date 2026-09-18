@@ -230,7 +230,7 @@ elapsed_time_s]` on the parent activity.
   once the segment count is large enough that surfacing a "favorites" subset
   on a dashboard actually helps.
 
-## Phase F — synchronized hover: charts ↔ map
+## Phase F — synchronized hover: charts ↔ map ✅ Done (2026-09-18)
 
 Hovering any data plot (activity detail's heart_rate/elevation/speed/
 cadence/power charts, segment detail's elevation profile from Phase C)
@@ -267,6 +267,35 @@ in two different forms (`segments/new.html`'s ghost marker during slider
 drag, `activities/detail.html`'s hover-to-highlight segment polylines) —
 this is a third variation on a pattern this codebase already has twice,
 not a new one.
+
+**Segment detail** (simpler case, built first to establish the pattern):
+hovering the elevation profile shows a playhead plus a map cursor, mapped
+by *fraction of each line's own total length* rather than assuming
+`segment.geom`'s length and the elevation profile's freshly-derived length
+match exactly — they don't, by about 0.2% on real data (751.8m vs 753.3m
+for the same segment, one measured via Leaflet's Haversine, the other via
+PostGIS geography), since they're computed by two different queries
+against two different geometries describing the same physical path.
+Verified with real extracted data: hovering at 25/50/75% along the chart
+produces monotonically progressing, correctly-ordered map positions.
+
+**Activity detail** (the real complexity, as flagged above) — new
+`activity_detail` route now also serializes `Track.times` to the client
+(ISO strings, matching the exact format streams already use, so a hover
+timestamp compares directly against either without reparsing). Sync is
+keyed by *timestamp*, not array index, specifically because different
+stream types decimate to different point counts (verified on real data:
+hovering heart_rate — 500 points — at its own index 250 correctly
+resolved elevation to the same index 250, but speed — only 500 of 1402
+raw points survived a *different* decimation ratio — to index 247, and
+the map — the full undecimated 1402-point track — to index 692, all four
+landing on the exact same instant). `nearestTimeIndex` checks both
+neighbors around its binary-search landing point rather than just taking
+the first `>=` match, since a sparser stream can otherwise land
+meaningfully further from the true hovered instant than a denser one.
+Verified graceful degradation too: an activity with streams but no track
+still gets full chart-to-chart sync, just no map cursor (guarded, not a
+crash).
 
 ## Phase G — themed modal component (replacing native confirm()/prompt())
 
