@@ -20,7 +20,7 @@ from app.models import (
     Track,
     User,
 )
-from app.segments.geometry import compute_segment_geometry
+from app.segments.geometry import compute_segment_geometry, find_nearest_track_index
 from app.segments.matching import find_similar_segments, match_segment_against_activities
 from app.web.formatting import (
     decimate,
@@ -268,9 +268,7 @@ async def segment_create(
     confirm_similar: str | None = Form(None),
     db: AsyncSession = Depends(get_db),
 ):
-    async def _rerender(
-        error: str | None, similar: list[dict] | None = None, frac_pair=None
-    ):
+    async def _rerender(error: str | None, similar: list[dict] | None = None):
         activity = await db.scalar(
             select(Activity)
             .options(joinedload(Activity.sport))
@@ -281,17 +279,22 @@ async def segment_create(
         )
         sports = list((await db.execute(select(Sport).order_by(Sport.name))).scalars().all())
         pending = None
-        if similar and frac_pair is not None:
+        if similar:
             # Carry the original slider selection through the re-render —
             # without this, the slider resets to its full-range default,
             # and clicking "Save segment" again would silently create a
             # segment from the wrong (full-track) range instead of
-            # confirming what was actually picked.
+            # confirming what was actually picked. Looked up by nearest
+            # vertex (not the fraction ST_LineLocatePoint would give) since
+            # start_lat/start_lon are already the exact clicked vertex
+            # coordinates the client sent — see find_nearest_track_index's
+            # docstring for why fractions aren't safe to hand back to the
+            # client's real-meter-distance-based slider.
             pending = {
                 "name": name,
                 "sport_id": sport_id,
-                "start_frac": frac_pair[0],
-                "end_frac": frac_pair[1],
+                "start_idx": await find_nearest_track_index(db, activity_id, start_lat, start_lon),
+                "end_idx": await find_nearest_track_index(db, activity_id, end_lat, end_lon),
             }
         return templates.TemplateResponse(
             request,
@@ -313,12 +316,12 @@ async def segment_create(
         return await _rerender(
             "Those two points are too close together — pick two points further apart along the track."
         )
-    f1, f2, new_geom_wkt = result
+    _, _, new_geom_wkt = result
 
     if not confirm_similar:
         similar = await find_similar_segments(db, new_geom_wkt, sport_id)
         if similar:
-            return await _rerender(None, similar, (f1, f2))
+            return await _rerender(None, similar)
 
     # Not wrapped in `async with db.begin()` — compute_segment_geometry's
     # SELECT above already auto-began a transaction on this session
@@ -387,15 +390,14 @@ async def segment_edit_form(
     )
     sports = list((await db.execute(select(Sport).order_by(Sport.name))).scalars().all())
 
-    fractions = (
+    endpoints = (
         await db.execute(
             text(
                 """
                 SELECT
-                    ST_LineLocatePoint(ST_Force2D(t.geom), ST_StartPoint(s.geom)) AS f1,
-                    ST_LineLocatePoint(ST_Force2D(t.geom), ST_EndPoint(s.geom)) AS f2
-                FROM tracks t, segments s
-                WHERE t.activity_id = s.source_activity_id AND s.id = :segment_id
+                    ST_Y(ST_StartPoint(geom)) AS start_lat, ST_X(ST_StartPoint(geom)) AS start_lon,
+                    ST_Y(ST_EndPoint(geom)) AS end_lat, ST_X(ST_EndPoint(geom)) AS end_lon
+                FROM segments WHERE id = :segment_id
                 """
             ),
             {"segment_id": segment_id},
@@ -419,8 +421,12 @@ async def segment_edit_form(
             "pending": {
                 "name": segment.name,
                 "sport_id": segment.sport_id,
-                "start_frac": fractions.f1,
-                "end_frac": fractions.f2,
+                "start_idx": await find_nearest_track_index(
+                    db, segment.source_activity_id, endpoints.start_lat, endpoints.start_lon
+                ),
+                "end_idx": await find_nearest_track_index(
+                    db, segment.source_activity_id, endpoints.end_lat, endpoints.end_lon
+                ),
             },
             "edit_segment_id": segment_id,
             "existing_effort_count": effort_count,
@@ -448,7 +454,7 @@ async def segment_update(
         )
     source_activity_id = segment.source_activity_id
 
-    async def _rerender(error: str | None, similar: list[dict] | None = None, frac_pair=None):
+    async def _rerender(error: str | None, similar: list[dict] | None = None):
         activity = await db.scalar(
             select(Activity)
             .options(joinedload(Activity.sport))
@@ -463,8 +469,13 @@ async def segment_update(
             {"segment_id": segment_id},
         )
         pending = {"name": name, "sport_id": sport_id}
-        if frac_pair is not None:
-            pending["start_frac"], pending["end_frac"] = frac_pair
+        if similar:
+            pending["start_idx"] = await find_nearest_track_index(
+                db, source_activity_id, start_lat, start_lon
+            )
+            pending["end_idx"] = await find_nearest_track_index(
+                db, source_activity_id, end_lat, end_lon
+            )
         return templates.TemplateResponse(
             request,
             "segments/new.html",
@@ -487,14 +498,14 @@ async def segment_update(
         return await _rerender(
             "Those two points are too close together — pick two points further apart along the track."
         )
-    f1, f2, new_geom_wkt = result
+    _, _, new_geom_wkt = result
 
     if not confirm_similar:
         similar = await find_similar_segments(
             db, new_geom_wkt, sport_id, exclude_segment_id=segment_id
         )
         if similar:
-            return await _rerender(None, similar, (f1, f2))
+            return await _rerender(None, similar)
 
     await db.execute(
         text(

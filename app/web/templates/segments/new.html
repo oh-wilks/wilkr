@@ -410,14 +410,18 @@
       bindHandle(startHandle, true);
       bindHandle(endHandle, false);
 
-      {% if pending and pending.start_frac is defined %}
+      {% if pending and pending.start_idx is defined and pending.start_idx is not none %}
       // Editing an existing segment, or a similarity warning re-rendered
-      // this page — restore the known selection instead of defaulting to
-      // the full track, so resubmitting confirms what was actually picked
-      // (or the segment's current range, for an edit's initial load)
-      // rather than an unrelated full-range one.
-      startIdx = distanceToIndex({{ pending.start_frac }} * totalDist);
-      endIdx = distanceToIndex({{ pending.end_frac }} * totalDist);
+      // this page — restore the known selection (by exact track-vertex
+      // index, computed server-side by real distance, not by fraction —
+      // ST_LineLocatePoint's fraction is in the geometry's native degree
+      // coordinates, not real meters, and at this app's latitudes that's a
+      // meaningfully different position once multiplied back out against
+      // totalDist here, which *is* in real meters) instead of defaulting
+      // to the full track, so resubmitting confirms what was actually
+      // picked rather than an unrelated full-range or drifted one.
+      startIdx = {{ pending.start_idx }};
+      endIdx = {{ pending.end_idx }};
       {% endif %}
 
       render();

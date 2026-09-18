@@ -113,6 +113,26 @@ rather than after.
   range → name and geometry both updated, old efforts gone, 8 fresh ones
   rescanned (not stale) → resubmitting the same new range doesn't
   false-positive against itself.
+
+  A third bug reported after shipping (user-caught, real-world use, not a
+  test I'd written): the edit form's pre-filled handles landed a few
+  hundred meters from where the segment was actually created — "not too
+  far, but different." Root cause was a units mismatch, not vertex
+  rounding: the pre-fill fraction came from `ST_LineLocatePoint`, which
+  operates on the geometry's native *degree* coordinates, while the
+  client's slider positions handles using real-meter cumulative distance
+  (Leaflet's `distanceTo`). At this app's latitude (~54°N) a degree of
+  longitude is only ~59% as long as a degree of latitude, so a fraction
+  computed in degree-space and then multiplied back out against a
+  real-meter total lands at a measurably different physical point — 435m
+  off on the activity used to diagnose it, confirmed by hand (the
+  continuous-fraction round trip through PostGIS alone was pixel-perfect;
+  only reinterpreting that fraction as a real-meter fraction on the client
+  introduced the error). Fixed by dropping fractions from this path
+  entirely: `find_nearest_track_index` (`app/segments/geometry.py`) finds
+  the nearest track vertex by real (geography) distance and hands the
+  client an index directly, no unit conversion involved. Verified against
+  real data down to sub-millimeter precision (floating-point noise only).
 - ✅ **Done (2026-09-18).** "…" action menu on segment detail —
   `<details class="action-menu">`/`<summary>` dropdown holding Rename,
   Edit start/end, Rescan, and Delete — all four CRUD/maintenance actions in

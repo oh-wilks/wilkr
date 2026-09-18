@@ -33,6 +33,37 @@ _SUBSTRING_WKT = text(
     """
 )
 
+# Nearest track vertex to a point, by real (geography) distance — not by
+# fraction. ST_LineLocatePoint operates on the geometry's native degree
+# coordinates, not meters; at this app's latitudes a degree of longitude is
+# meaningfully shorter than a degree of latitude, so a fraction computed
+# that way and then multiplied by the client's real-meter cumulative
+# distance (used to build the edit-flow slider) lands at a different
+# physical point — a few hundred meters off on a real track, confirmed by
+# hand against activity 826. Finding the nearest vertex directly sidesteps
+# the mismatch instead of trying to reconcile the two domains.
+_NEAREST_INDEX = text(
+    """
+    WITH track_points AS (
+        SELECT (dp.path)[1] - 1 AS idx, dp.geom AS pt
+        FROM tracks t, LATERAL ST_DumpPoints(ST_Force2D(t.geom)) AS dp
+        WHERE t.activity_id = :activity_id
+    )
+    SELECT idx
+    FROM track_points
+    ORDER BY pt::geography <-> ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography
+    LIMIT 1
+    """
+)
+
+
+async def find_nearest_track_index(
+    db: AsyncSession, activity_id: int, lat: float, lon: float
+) -> int | None:
+    """0-based index into the track's vertex array (same order the client's
+    `latlngs` array uses) nearest to (lat, lon) by real distance."""
+    return await db.scalar(_NEAREST_INDEX, {"activity_id": activity_id, "lat": lat, "lon": lon})
+
 
 async def compute_segment_geometry(
     db: AsyncSession,
